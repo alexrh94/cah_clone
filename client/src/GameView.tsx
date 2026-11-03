@@ -7,7 +7,6 @@ export function GameView({
   table,
   notice,
   onSubmit,
-  onHighlight,
   onConfirm,
   onNextTurn,
   onLeave,
@@ -17,12 +16,12 @@ export function GameView({
   table: TableState
   notice: string
   onSubmit: (cardIds: string[]) => boolean
-  onHighlight: (submissionId: string) => boolean
-  onConfirm: () => boolean
+  onConfirm: (submissionId: string) => boolean
   onNextTurn: () => boolean
   onLeave: () => void
 }) {
   const [selected, setSelected] = useState<string[]>([])
+  const [choice, setChoice] = useState<string | null>(null)
   const isTzar = table.tzarId === playerId
   const readyToPlay = selected.length === table.black.pick
   const winner = table.lastWinnerId ? playerName(room, table.lastWinnerId, playerId) : null
@@ -30,13 +29,19 @@ export function GameView({
 
   useEffect(() => {
     setSelected([])
+    setChoice(null)
   }, [table.black.text, table.phase])
 
   function toggle(cardId: string) {
     setSelected((current) => {
-      if (current.includes(cardId)) return current.filter((id) => id !== cardId)
-      if (current.length >= table.black.pick) return current
-      return [...current, cardId]
+      const pick = table.black.pick
+      const index = current.indexOf(cardId)
+      if (index >= 0) {
+        if (current.length < pick || index === current.length - 1) return current.filter((id) => id !== cardId)
+        return [...current.slice(0, index), ...current.slice(index + 1), cardId]
+      }
+      if (current.length < pick) return [...current, cardId]
+      return [...current.slice(0, -1), cardId]
     })
   }
 
@@ -65,6 +70,7 @@ export function GameView({
       </aside>
 
       <section className="stage">
+        {table.phase === 'reveal' && winner && <p className="round-winner">{winner} won this round.</p>}
         <article className="black-card" aria-label="Black card">
           <Prompt text={table.black.text} />
           {table.black.pick > 1 && <p className="pick-count">Play {table.black.pick} cards</p>}
@@ -78,9 +84,10 @@ export function GameView({
                 submission={submission}
                 index={index}
                 text={table.black.text}
-                highlighted={submission.id === table.highlightedId}
+                highlighted={isTzar && table.phase === 'judging' && submission.id === choice}
+                winner={table.phase === 'reveal' && submission.id === table.highlightedId}
                 selectable={isTzar && table.phase === 'judging'}
-                onHighlight={onHighlight}
+                onChoose={setChoice}
               />
             ))}
           </div>
@@ -125,7 +132,14 @@ export function GameView({
         ) : isTzar && table.phase === 'judging' ? (
           <>
             <p className="tzar-note">You are the Card Tzar</p>
-            <button type="button" className="confirm" disabled={table.highlightedId === null} onClick={() => onConfirm()}>
+            <button
+              type="button"
+              className="confirm"
+              disabled={choice === null}
+              onClick={() => {
+                if (choice) onConfirm(choice)
+              }}
+            >
               Confirm
             </button>
           </>
@@ -154,21 +168,23 @@ function SubmissionCard({
   index,
   text,
   highlighted,
+  winner,
   selectable,
-  onHighlight,
+  onChoose,
 }: {
   submission: PublicSubmission
   index: number
   text: string
   highlighted: boolean
+  winner: boolean
   selectable: boolean
-  onHighlight: (submissionId: string) => boolean
+  onChoose: (submissionId: string) => void
 }) {
-  const className = highlighted ? 'submission is-winner' : 'submission'
+  const className = winner ? 'submission is-winner' : highlighted ? 'submission is-choice' : 'submission'
   const body = <Prompt text={text} fills={submission.cards} />
   if (!selectable) {
     return (
-      <article className={className} aria-label={highlighted ? `Winning set ${index + 1}` : `Set ${index + 1}`}>
+      <article className={className} aria-label={winner ? `Winning set ${index + 1}` : `Set ${index + 1}`}>
         {body}
       </article>
     )
@@ -179,7 +195,7 @@ function SubmissionCard({
       className={className}
       aria-pressed={highlighted}
       aria-label={`Choose set ${index + 1}`}
-      onClick={() => onHighlight(submission.id)}
+      onClick={() => onChoose(submission.id)}
     >
       {body}
     </button>

@@ -4,7 +4,7 @@ import http from 'node:http'
 import { join } from 'node:path'
 import { WebSocket, WebSocketServer, type RawData } from 'ws'
 import { listDecks, loadDeck, MAX_DECK_BYTES, UNDERSCORE_MESSAGE, validateDeck, type Deck, type DeckList } from './deck.js'
-import { confirmWinner, createGame, highlightWinner, nextTurn, removePlayer, submitCards, viewFor, type GameState } from './game.js'
+import { confirmWinner, createGame, nextTurn, removePlayer, submitCards, viewFor, type GameState } from './game.js'
 import { generateUniqueRoomCode } from './roomCode.js'
 import { createRoomStore, type PublicRoom, type RoomChange } from './rooms.js'
 import { contentTypeFor, resolveClientFile } from './static.js'
@@ -38,8 +38,7 @@ type ClientMessage =
   | { type: 'upload_deck'; deck: unknown }
   | { type: 'start_game' }
   | { type: 'submit_cards'; cardIds: string[] }
-  | { type: 'highlight_winner'; submissionId: string }
-  | { type: 'confirm_winner' }
+  | { type: 'confirm_winner'; submissionId: string }
   | { type: 'next_turn' }
   | { type: 'leave_room' }
 
@@ -73,10 +72,9 @@ function parseClientMessage(value: unknown): ClientMessage | null {
   if (value.type === 'submit_cards' && Array.isArray(value.cardIds) && value.cardIds.every((id) => typeof id === 'string')) {
     return { type: 'submit_cards', cardIds: value.cardIds }
   }
-  if (value.type === 'highlight_winner' && typeof value.submissionId === 'string') {
-    return { type: 'highlight_winner', submissionId: value.submissionId }
+  if (value.type === 'confirm_winner' && typeof value.submissionId === 'string') {
+    return { type: 'confirm_winner', submissionId: value.submissionId }
   }
-  if (value.type === 'confirm_winner') return { type: 'confirm_winner' }
   if (value.type === 'next_turn') return { type: 'next_turn' }
   return null
 }
@@ -433,17 +431,14 @@ export function createGameServer(
         return
       }
 
-      if (message.type === 'highlight_winner' || message.type === 'confirm_winner') {
+      if (message.type === 'confirm_winner') {
         const code = rooms.codeFor(playerId)
         const game = code ? games.get(code) : undefined
         if (!game || !code) {
           sendError(socket, 'The game has not started.')
           return
         }
-        const result =
-          message.type === 'highlight_winner'
-            ? highlightWinner(game, playerId, message.submissionId)
-            : confirmWinner(game, playerId)
+        const result = confirmWinner(game, playerId, message.submissionId)
         if (!result.ok) {
           sendError(socket, result.error)
           return

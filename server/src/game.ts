@@ -238,22 +238,7 @@ export function submitCards(game: GameState, playerId: string, cardIds: string[]
   return { ok: true, judging }
 }
 
-export function highlightWinner(game: GameState, playerId: string, submissionId: string): GameResult<{ highlightedId: string }> {
-  if (game.phase !== 'judging') {
-    return { ok: false, error: 'Wait until everyone has chosen.' }
-  }
-  if (playerId !== tzarId(game)) {
-    return { ok: false, error: 'Only the Card Tzar can choose the winner.' }
-  }
-  if (!game.judgingOrder.some((entry) => entry.id === submissionId)) {
-    return { ok: false, error: 'That set is not on the table.' }
-  }
-
-  game.highlightedId = submissionId
-  return { ok: true, highlightedId: submissionId }
-}
-
-export function confirmWinner(game: GameState, playerId: string): GameResult<{ winnerId: string }> {
+export function confirmWinner(game: GameState, playerId: string, submissionId: string): GameResult<{ winnerId: string }> {
   if (game.phase !== 'judging') {
     return { ok: false, error: 'Wait until everyone has chosen.' }
   }
@@ -261,9 +246,10 @@ export function confirmWinner(game: GameState, playerId: string): GameResult<{ w
     return { ok: false, error: 'Only the Card Tzar can choose the winner.' }
   }
 
-  const winning = game.judgingOrder.find((entry) => entry.id === game.highlightedId)
+  const winning = game.judgingOrder.find((entry) => entry.id === submissionId)
   if (!winning) return { ok: false, error: 'Choose a set before confirming.' }
 
+  game.highlightedId = submissionId
   const score = (game.scores.get(winning.playerId) ?? 0) + 1
   game.scores.set(winning.playerId, score)
   game.lastWinnerId = winning.playerId

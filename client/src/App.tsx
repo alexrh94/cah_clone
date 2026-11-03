@@ -33,7 +33,6 @@ export function App() {
           table={game.table}
           notice={game.notice}
           onSubmit={game.submitCards}
-          onHighlight={game.highlightWinner}
           onConfirm={game.confirmWinner}
           onNextTurn={game.nextTurn}
           onLeave={game.leaveRoom}

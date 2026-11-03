@@ -266,8 +266,7 @@ test('a round awards a point and the score limit returns the room to the lobby',
     assert.equal(judging.phase, 'judging')
     const submission = Array.isArray(judging.submissions) ? judging.submissions[0] : null
     const submissionId = isRecord(submission) && typeof submission.id === 'string' ? submission.id : ''
-    host.send({ type: 'highlight_winner', submissionId })
-    host.send({ type: 'confirm_winner' })
+    host.send({ type: 'confirm_winner', submissionId })
     host.send({ type: 'next_turn' })
 
     const notice = await until(host, 'notice')

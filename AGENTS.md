@@ -42,7 +42,7 @@ At the start of a game everyone is dealt the same hand. The target size is 10. I
 
 ## Play
 
-The Card Tzar starts as the host and moves to the next player in join order after each round. The Tzar does not play a white card. Everyone else submits exactly `pick` cards from their hand, in the order that fills the blanks from left to right. Submissions stay hidden until everyone has chosen, then they are shuffled and sent as `{ "id", "cards" }` with no player id. The Tzar highlights a set, confirms it, and that player gains a point. The highlighted set bounces until the Tzar starts the next turn. Played white cards then go to the bottom of the white deck, hands are drawn back to size, and the used black card is discarded. An empty black deck is rebuilt by shuffling the discards. If the score limit was reached, the next turn ends the game instead.
+The Card Tzar starts as the host and moves to the next player in join order after each round. The Tzar does not play a white card. Everyone else submits exactly `pick` cards from their hand, in the order that fills the blanks from left to right. Submissions stay hidden until everyone has chosen, then they are shuffled and sent as `{ "id", "cards" }` with no player id. The Tzar selects a set on their own screen, then confirms it. Until then nobody else sees a highlight. Confirming awards the point, shows that set to everyone, and names the winner. The highlighted set bounces until the Tzar starts the next turn. Played white cards then go to the bottom of the white deck, hands are drawn back to size, and the used black card is discarded. An empty black deck is rebuilt by shuffling the discards. If the score limit was reached, the next turn ends the game instead.
 
 When a score reaches the limit, the game state is cleared and a `notice` names the winner. The room keeps its deck and score limit. Scores start at zero on the next game. If a player leaves and fewer than three remain, the game returns to the lobby. Their hand and any submission go to the bottom of the white deck.
 
@@ -61,12 +61,11 @@ Client messages:
 | `{ "type": "upload_deck", "deck": { "name", "black", "white" } }` | Host uploads a custom deck for this room. |
 | `{ "type": "start_game" }` | Host deals the selected deck. |
 | `{ "type": "submit_cards", "cardIds": ["c1"] }` | A non-Tzar locks in that many cards, in blank order. |
-| `{ "type": "highlight_winner", "submissionId": "s1" }` | The Card Tzar highlights a set. Everyone sees it. |
-| `{ "type": "confirm_winner" }` | The Card Tzar locks that set in and awards the point. |
+| `{ "type": "confirm_winner", "submissionId": "s1" }` | The Card Tzar locks that set in, awards the point, and shows the winner to everyone. |
 | `{ "type": "next_turn" }` | The Card Tzar starts the next round, or ends the game at the score limit. |
 | `{ "type": "leave_room" }` | Leave the current room. |
 
-A room update is `{ "type": "room", "code", "deckId", "scoreLimit", "hostId", "playerIds", "players", "customDecks" }`. A game update is `{ "type": "game", ... }` and is different for each player: it includes that player's hand and, while judging or revealing, the anonymous submissions plus `highlightedId`. Failures are `{ "type": "error", "message": "..." }`. The underscore failure also includes `cards`. `{ "type": "notice", "message": "..." }` clears the table and is how a finished game sends everyone back to the lobby.
+A room update is `{ "type": "room", "code", "deckId", "scoreLimit", "hostId", "playerIds", "players", "customDecks" }`. A game update is `{ "type": "game", ... }` and is different for each player: it includes that player's hand and, while judging or revealing, the anonymous submissions. `highlightedId` stays null until the Card Tzar confirms, then every player sees the winning set. Failures are `{ "type": "error", "message": "..." }`. The underscore failure also includes `cards`. `{ "type": "notice", "message": "..." }` clears the table and is how a finished game sends everyone back to the lobby.
 
 ## Tests
 

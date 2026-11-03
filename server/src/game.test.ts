@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Deck } from './deck.js'
-import { confirmWinner, createGame, highlightWinner, nextTurn, removePlayer, submitCards, tzarId, viewFor } from './game.js'
+import { confirmWinner, createGame, nextTurn, removePlayer, submitCards, tzarId, viewFor } from './game.js'
 
 const steady = () => 0.999999
 
@@ -67,18 +67,19 @@ test('players submit in order, then the Card Tzar picks an anonymous set', () =>
 
   const winner = view.submissions?.[0]
   assert.ok(winner)
-  assert.equal(highlightWinner(game, 'a', winner?.id ?? '').ok, false)
-  const highlighted = highlightWinner(game, 'host', winner?.id ?? '')
-  assert.equal(highlighted.ok, true)
-  assert.equal(viewFor(game, 'b').highlightedId, winner?.id)
+  assert.equal(viewFor(game, 'host').highlightedId, null)
+  assert.equal(viewFor(game, 'b').highlightedId, null)
+  assert.equal(confirmWinner(game, 'a', winner?.id ?? '').ok, false)
+  assert.equal(confirmWinner(game, 'host', 'missing').ok, false)
   assert.equal(game.scores.get('a'), 0)
   assert.equal(game.scores.get('b'), 0)
 
-  assert.equal(confirmWinner(game, 'a').ok, false)
-  const confirmed = confirmWinner(game, 'host')
+  const confirmed = confirmWinner(game, 'host', winner?.id ?? '')
   assert.equal(confirmed.ok, true)
   if (!confirmed.ok) return
   assert.equal(game.phase, 'reveal')
+  assert.equal(viewFor(game, 'b').highlightedId, winner?.id)
+  assert.equal(viewFor(game, 'host').highlightedId, winner?.id)
   assert.equal(game.scores.get(confirmed.winnerId), 1)
   assert.equal(tzarId(game), 'host')
   assert.equal(game.currentBlack.text, 'one _')
@@ -102,9 +103,9 @@ test('a score limit ends the game', () => {
   assert.equal(submitCards(game, 'a', [game.hands.get('a')?.[0]?.id ?? '']).ok, true)
   assert.equal(submitCards(game, 'b', [game.hands.get('b')?.[0]?.id ?? '']).ok, true)
   const submissionId = viewFor(game, 'host').submissions?.[0]?.id ?? ''
-  assert.equal(confirmWinner(game, 'host').ok, false)
-  assert.equal(highlightWinner(game, 'host', submissionId).ok, true)
-  const confirmed = confirmWinner(game, 'host')
+  assert.equal(viewFor(game, 'a').highlightedId, null)
+  assert.equal(confirmWinner(game, 'host', '').ok, false)
+  const confirmed = confirmWinner(game, 'host', submissionId)
   assert.equal(confirmed.ok, true)
   if (!confirmed.ok) return
   assert.equal(game.phase, 'reveal')

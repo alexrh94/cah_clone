@@ -385,20 +385,14 @@ export function useGameServer() {
     [send],
   )
 
-  const highlightWinner = useCallback(
+  const confirmWinner = useCallback(
     (submissionId: string) => {
-      if (!send({ type: 'highlight_winner', submissionId })) return false
+      if (!send({ type: 'confirm_winner', submissionId })) return false
       setNotice('')
       return true
     },
     [send],
   )
-
-  const confirmWinner = useCallback(() => {
-    if (!send({ type: 'confirm_winner' })) return false
-    setNotice('')
-    return true
-  }, [send])
 
   const nextTurn = useCallback(() => {
     if (!send({ type: 'next_turn' })) return false
@@ -422,7 +416,6 @@ export function useGameServer() {
     leaveRoom,
     startGame,
     submitCards,
-    highlightWinner,
     confirmWinner,
     nextTurn,
   }
