@@ -8,7 +8,7 @@ The repo is one npm package at the root (`"type": "module"`). It needs Node.js 2
 
 - `client/` is the React and TypeScript UI. Vite's root is this directory (`client/vite.config.ts`), and `npm run build` writes the production files to `dist/client`. The dev server listens on port 5173 and proxies `/ws` to `http://localhost:3000`. `App.tsx` is the home screen and the pregame room. `GameView.tsx` is the table. `useGameServer.ts` owns the WebSocket.
 - `server/` is the Node.js HTTP and WebSocket server, using the `ws` package. `server/src/index.ts` serves `dist/client`, reads `decks/`, and listens on `PORT`, which defaults to 3000.
-  - `server.ts` creates the HTTP server and a WebSocket server on `/ws`. It turns socket messages into room and game changes and is the only place that knows which socket belongs to which player.
+  - `server.ts` creates the HTTP server and a WebSocket server on `/ws`. It turns socket messages into room and game changes and is the only place that knows which socket belongs to which player. A dropped socket keeps that player's seat for 10 seconds.
   - `static.ts` resolves client files inside the build directory, blocks paths that escape it, and falls back to `index.html` for application routes such as `/room/ABCD`.
   - `deck.ts` validates a deck object, loads one from disk, lists the decks in a directory, and concatenates selected decks. A deck needs a name, at least one black card, and at least one white card. Black and white cards are strings. A black card with no `_` is invalid. The pick count is the number of `_` characters. `listDecks` uses each `*.json` file name without the extension as the id (`sample.json` becomes `sample`) and the deck's own name as the label, and includes `blackCount` and `whiteCount`. A non-JSON file is ignored. An invalid built-in deck is left off the list and reported to the client.
   - `roomCode.ts` generates and checks room codes made of four uppercase letters. The server generates the code when a room is created and skips codes that are already taken, including rooms waiting out their empty-room grace period.
@@ -22,9 +22,9 @@ The home screen has a nickname box above the room code. Both are optional to sta
 
 The player who creates the room is the host. Only the host can choose decks, set the score limit, upload a deck, or start. The score limit is a whole number from 1 to 20 and starts at 7. A game needs at least three players. The host can select any number of built-in and uploaded decks. A new upload shows up in that list and stays unselected until the host turns it on.
 
-A player is in at most one room: creating or joining another room removes them from the previous one and tells whoever is left. If the host leaves, the next player in join order becomes host. When the last player leaves, the room stays open for 15 seconds so a refresh of `/room/ABCD` can rejoin the same code. After that the room, including any uploaded decks, is deleted.
+A player is in at most one room: creating or joining another room removes them from the previous one and tells whoever is left. If the host leaves, the next player in join order becomes host. When the last player leaves, the room stays open for 15 seconds. After that the room, including any uploaded decks, is deleted.
 
-The browser address is `/room/` plus the code. The socket client joins that code on connect, using the stored nickname. Both Vite and the static server serve `index.html` for that path. A refresh is a new player. Joining is rejected while a game is in progress.
+The browser address is `/room/` plus the code. The socket client joins that code on connect, using the stored nickname. The client stores the player id in `sessionStorage` under `cah-player-id`. Both Vite and the static server serve `index.html` for that path. A refresh of that path sends `resume` with the stored id. The server keeps the dropped seat, including that player's hand and the current turn, for 10 seconds so the refresh can reclaim it. Closing the tab does not resume, and the seat is removed when that window ends. An explicit leave removes the seat immediately. Joining as a new player is rejected while a game is in progress.
 
 ## Decks
 
@@ -48,7 +48,7 @@ When a score reaches the limit, the game state is cleared and a `notice` names t
 
 ## WebSocket messages
 
-A new socket receives `{ "type": "connected", "playerId": "..." }` and then `{ "type": "decks", "decks": [{ "id": "sample", "name": "Sample", "blackCount": 10, "whiteCount": 40 }] }`. A bad built-in deck also produces the underscore `error`. Custom deck summaries use the same `blackCount` and `whiteCount` fields.
+A new socket receives `{ "type": "connected", "playerId": "..." }` and then `{ "type": "decks", "decks": [{ "id": "sample", "name": "Sample", "blackCount": 10, "whiteCount": 40 }] }`. A bad built-in deck also produces the underscore `error`. Custom deck summaries use the same `blackCount` and `whiteCount` fields. A resumed connection receives `connected` again with the original player id, then the current room and, when a game is running, that player's game view.
 
 Client messages:
 
@@ -56,6 +56,7 @@ Client messages:
 | --- | --- |
 | `{ "type": "create_room", "nickname": "Alex" }` | Open a room. The server picks the code. |
 | `{ "type": "join_room", "code": "ABCD", "nickname": "Sam" }` | Join a room. The code is trimmed and uppercased. |
+| `{ "type": "resume", "playerId": "...", "code": "ABCD", "nickname": "Sam" }` | Reclaim a dropped seat. The id must still be in that room. |
 | `{ "type": "select_decks", "deckIds": ["sample"] }` | Host replaces the selected decks. An empty list clears the selection. |
 | `{ "type": "set_score_limit", "scoreLimit": 7 }` | Host sets the winning score. |
 | `{ "type": "upload_deck", "deck": { "name", "black", "white" } }` | Host uploads a custom deck for this room. |

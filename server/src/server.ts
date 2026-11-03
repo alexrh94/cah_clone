@@ -10,6 +10,7 @@ import { createRoomStore, type PublicRoom, type RoomChange } from './rooms.js'
 import { contentTypeFor, resolveClientFile } from './static.js'
 
 const EMPTY_ROOM_MS = 15_000
+const RECONNECT_MS = 10_000
 const NICKNAME_LIMIT = 24
 
 export interface GameServer {
@@ -33,6 +34,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 type ClientMessage =
   | { type: 'create_room'; nickname: string }
   | { type: 'join_room'; code: string; nickname: string }
+  | { type: 'resume'; playerId: string; code: string; nickname: string }
   | { type: 'select_decks'; deckIds: string[] }
   | { type: 'set_score_limit'; scoreLimit: number }
   | { type: 'upload_deck'; deck: unknown }
@@ -62,6 +64,9 @@ function parseClientMessage(value: unknown): ClientMessage | null {
   if (value.type === 'start_game') return { type: 'start_game' }
   if (value.type === 'join_room' && typeof value.code === 'string') {
     return { type: 'join_room', code: value.code, nickname: readNickname(value.nickname) }
+  }
+  if (value.type === 'resume' && typeof value.playerId === 'string' && value.playerId !== '' && typeof value.code === 'string') {
+    return { type: 'resume', playerId: value.playerId, code: value.code, nickname: readNickname(value.nickname) }
   }
   if (
     value.type === 'select_decks' &&
@@ -95,6 +100,7 @@ export function createGameServer(
   clientDir: string,
   decksDir: string,
   emptyRoomMs = EMPTY_ROOM_MS,
+  reconnectMs = RECONNECT_MS,
   random: () => number = Math.random,
 ): GameServer {
   const rooms = createRoomStore()
@@ -102,6 +108,7 @@ export function createGameServer(
   const sockets = new Map<string, WebSocket>()
   const nicknames = new Map<string, string>()
   const expirations = new Map<string, NodeJS.Timeout>()
+  const disconnects = new Map<string, NodeJS.Timeout>()
 
   const httpServer = http.createServer((req, res) => {
     if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -128,6 +135,8 @@ export function createGameServer(
   httpServer.on('close', () => {
     for (const timer of expirations.values()) clearTimeout(timer)
     expirations.clear()
+    for (const timer of disconnects.values()) clearTimeout(timer)
+    disconnects.clear()
   })
 
   function send(socket: WebSocket, message: object): void {
@@ -193,6 +202,25 @@ export function createGameServer(
     }, emptyRoomMs)
     timer.unref()
     expirations.set(code, timer)
+  }
+
+  function cancelDisconnect(playerId: string): void {
+    const timer = disconnects.get(playerId)
+    if (!timer) return
+    clearTimeout(timer)
+    disconnects.delete(playerId)
+  }
+
+  function scheduleDisconnect(playerId: string): void {
+    cancelDisconnect(playerId)
+    const timer = setTimeout(() => {
+      disconnects.delete(playerId)
+      if (sockets.has(playerId)) return
+      nicknames.delete(playerId)
+      applyMembership(rooms.leave(playerId))
+    }, reconnectMs)
+    timer.unref()
+    disconnects.set(playerId, timer)
   }
 
   function applyMembership(change: RoomChange | null): void {
@@ -268,7 +296,7 @@ export function createGameServer(
 
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' })
   wss.on('connection', (socket: WebSocket) => {
-    const playerId = randomUUID()
+    let playerId: string = randomUUID()
     sockets.set(playerId, socket)
     send(socket, { type: 'connected', playerId })
     sendDeckList(socket)
@@ -325,6 +353,25 @@ export function createGameServer(
         nicknames.set(playerId, message.nickname)
         applyMembership(result.previous)
         publish(result.room)
+        return
+      }
+
+      if (message.type === 'resume') {
+        const normalized = message.code.trim().toUpperCase()
+        if (rooms.codeFor(message.playerId) !== normalized) {
+          sendError(socket, 'Could not rejoin that room.')
+          return
+        }
+        if (playerId !== message.playerId && sockets.get(playerId) === socket) sockets.delete(playerId)
+        const previous = sockets.get(message.playerId)
+        sockets.set(message.playerId, socket)
+        if (previous && previous !== socket) previous.close()
+        cancelDisconnect(message.playerId)
+        playerId = message.playerId
+        nicknames.set(playerId, message.nickname)
+        send(socket, { type: 'connected', playerId })
+        const room = rooms.get(normalized)
+        if (room) publish(room)
         return
       }
 
@@ -507,13 +554,18 @@ export function createGameServer(
         return
       }
 
+      cancelDisconnect(playerId)
       applyMembership(rooms.leave(playerId))
     })
 
     socket.on('close', () => {
+      if (sockets.get(playerId) !== socket) return
       sockets.delete(playerId)
+      if (rooms.codeFor(playerId)) {
+        scheduleDisconnect(playerId)
+        return
+      }
       nicknames.delete(playerId)
-      applyMembership(rooms.leave(playerId))
     })
   })
 

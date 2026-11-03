@@ -49,6 +49,27 @@ function track(socket: WebSocket) {
         waiters.push(resolve)
       })
     },
+    nextWithin(ms: number): Promise<unknown | undefined> {
+      const queued = messages.shift()
+      if (queued !== undefined) return Promise.resolve(queued)
+      return new Promise((resolve) => {
+        let settled = false
+        const waiter = (message: unknown) => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          resolve(message)
+        }
+        const timer = setTimeout(() => {
+          if (settled) return
+          settled = true
+          const index = waiters.indexOf(waiter)
+          if (index !== -1) waiters.splice(index, 1)
+          resolve(undefined)
+        }, ms)
+        waiters.push(waiter)
+      })
+    },
     send(message: unknown) {
       socket.send(JSON.stringify(message))
     },
@@ -125,7 +146,7 @@ test('a built-in deck without an underscore is reported to the client', async ()
 test('an empty room closes after its grace period', async () => {
   const clientDir = mkdtempSync(join(tmpdir(), 'cah-serve-'))
   writeFileSync(join(clientDir, 'index.html'), '<h1>Cards Against Humanity</h1>')
-  const gameServer = createGameServer(clientDir, sampleDecksDir, 40)
+  const gameServer = createGameServer(clientDir, sampleDecksDir, 40, 30)
   const port = await listen(gameServer, 0)
   const socket = new WebSocket(`ws://127.0.0.1:${port}/ws`)
   const client = track(socket)
@@ -140,7 +161,7 @@ test('an empty room closes after its grace period', async () => {
       socket.once('close', resolve)
       socket.close()
     })
-    await new Promise((resolve) => setTimeout(resolve, 80))
+    await new Promise((resolve) => setTimeout(resolve, 200))
 
     const lateSocket = new WebSocket(`ws://127.0.0.1:${port}/ws`)
     const late = track(lateSocket)
@@ -394,6 +415,185 @@ test('a round awards a point and the score limit returns the room to the lobby',
     const lobby = await until(host, 'room')
     assert.equal(lobby.code, code)
     assert.deepEqual(lobby.deckIds, ['sample'])
+  } finally {
+    for (const socket of sockets) socket.close()
+    await closeGameServer(gameServer)
+  }
+})
+
+function handOf(view: Record<string, unknown>): Array<{ id: string; text: string }> {
+  const you = view.you
+  if (!isRecord(you) || !Array.isArray(you.hand)) return []
+  return you.hand.map((card) => ({
+    id: isRecord(card) && typeof card.id === 'string' ? card.id : '',
+    text: isRecord(card) && typeof card.text === 'string' ? card.text : '',
+  }))
+}
+
+async function startSampleGame(reconnectMs: number) {
+  const clientDir = mkdtempSync(join(tmpdir(), 'cah-serve-'))
+  writeFileSync(join(clientDir, 'index.html'), '<h1>Cards Against Humanity</h1>')
+  const gameServer = createGameServer(clientDir, sampleDecksDir, 15_000, reconnectMs)
+  const sockets: WebSocket[] = []
+  try {
+    const port = await listen(gameServer, 0)
+    const url = `ws://127.0.0.1:${port}/ws`
+    const opened = [new WebSocket(url), new WebSocket(url), new WebSocket(url)]
+    sockets.push(...opened)
+    const clients = opened.map(track)
+    const ids: string[] = []
+    for (const client of clients) {
+      const connected = await until(client, 'connected')
+      ids.push(typeof connected.playerId === 'string' ? connected.playerId : '')
+      await until(client, 'decks')
+    }
+
+    const host = clients[0]
+    const guest = clients[1]
+    const other = clients[2]
+    if (!host || !guest || !other) throw new Error('missing player')
+    host.send({ type: 'create_room', nickname: 'Alex' })
+    let room = await until(host, 'room')
+    const code = typeof room.code === 'string' ? room.code : ''
+    guest.send({ type: 'join_room', code, nickname: 'Sam' })
+    other.send({ type: 'join_room', code, nickname: 'Jo' })
+    while (!Array.isArray(room.playerIds) || room.playerIds.length < 3) room = await until(host, 'room')
+    await until(guest, 'room')
+    await until(other, 'room')
+
+    host.send({ type: 'select_decks', deckIds: ['sample'] })
+    host.send({ type: 'start_game' })
+    const views = []
+    for (const client of clients) views.push(await until(client, 'game'))
+    return { gameServer, port, sockets, clients, ids, code, views }
+  } catch (error) {
+    for (const socket of sockets) socket.close()
+    await closeGameServer(gameServer)
+    throw error
+  }
+}
+
+test('a refresh resumes the same hand and turn', async () => {
+  const started = await startSampleGame(1_000)
+  const { gameServer, port, sockets, clients, ids, code, views } = started
+  const host = clients[0]
+  const guestView = views[1]
+  try {
+    const guestSocket = sockets[1]
+    if (!host || !guestView || !guestSocket) throw new Error('missing player')
+    const hand = handOf(guestView)
+    assert.equal(hand.length, 10)
+    assert.equal(guestView.phase, 'picking')
+
+    await new Promise((resolve) => {
+      guestSocket.once('close', resolve)
+      guestSocket.close()
+    })
+    assert.equal(await host.nextWithin(80), undefined)
+
+    const resumedSocket = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+    sockets.push(resumedSocket)
+    const resumed = track(resumedSocket)
+    const temporary = await until(resumed, 'connected')
+    assert.notEqual(temporary.playerId, ids[1])
+    await until(resumed, 'decks')
+    resumed.send({ type: 'resume', playerId: ids[1], code, nickname: 'Sam' })
+    assert.equal((await until(resumed, 'connected')).playerId, ids[1])
+    const game = await until(resumed, 'game')
+    assert.equal(game.phase, 'picking')
+    assert.equal(game.tzarId, ids[0])
+    assert.deepEqual(handOf(game), hand)
+
+    const hostRoom = await until(host, 'room')
+    assert.deepEqual(hostRoom.playerIds, ids)
+    const hostGame = await until(host, 'game')
+    assert.equal(hostGame.phase, 'picking')
+    assert.equal(hostGame.tzarId, ids[0])
+  } finally {
+    for (const socket of sockets) socket.close()
+    await closeGameServer(gameServer)
+  }
+})
+
+test('a dropped seat leaves after the reconnect window', async () => {
+  const started = await startSampleGame(40)
+  const { gameServer, port, sockets, clients, ids, code } = started
+  const host = clients[0]
+  const guestSocket = sockets[1]
+  try {
+    if (!host || !guestSocket) throw new Error('missing player')
+    await new Promise((resolve) => {
+      guestSocket.once('close', resolve)
+      guestSocket.close()
+    })
+
+    assert.equal((await until(host, 'notice')).message, 'Not enough players to continue.')
+    const lobby = await until(host, 'room')
+    assert.deepEqual(lobby.playerIds, [ids[0], ids[2]])
+
+    const lateSocket = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+    sockets.push(lateSocket)
+    const late = track(lateSocket)
+    await until(late, 'connected')
+    await until(late, 'decks')
+    late.send({ type: 'resume', playerId: ids[1], code, nickname: 'Sam' })
+    assert.deepEqual(await until(late, 'error'), { type: 'error', message: 'Could not rejoin that room.' })
+  } finally {
+    for (const socket of sockets) socket.close()
+    await closeGameServer(gameServer)
+  }
+})
+
+test('leave_room removes the player before the reconnect window', async () => {
+  const started = await startSampleGame(5_000)
+  const { gameServer, sockets, clients, ids } = started
+  const host = clients[0]
+  const guest = clients[1]
+  try {
+    if (!host || !guest) throw new Error('missing player')
+    guest.send({ type: 'leave_room' })
+    const noticed = await host.nextWithin(200)
+    assert.equal(isRecord(noticed) && noticed.type, 'notice')
+    assert.equal(isRecord(noticed) && noticed.message, 'Not enough players to continue.')
+    const lobby = await until(host, 'room')
+    assert.deepEqual(lobby.playerIds, [ids[0], ids[2]])
+  } finally {
+    for (const socket of sockets) socket.close()
+    await closeGameServer(gameServer)
+  }
+})
+
+test('resume rejects an unknown seat and join stays closed during a game', async () => {
+  const started = await startSampleGame(5_000)
+  const { gameServer, port, sockets, clients, ids, code, views } = started
+  const guest = clients[1]
+  const guestView = views[1]
+  try {
+    if (!guest || !guestView) throw new Error('missing player')
+    const outsiderSocket = new WebSocket(`ws://127.0.0.1:${port}/ws`)
+    sockets.push(outsiderSocket)
+    const outsider = track(outsiderSocket)
+    await until(outsider, 'connected')
+    await until(outsider, 'decks')
+
+    outsider.send({ type: 'resume', playerId: 'missing-player', code, nickname: 'Pat' })
+    assert.deepEqual(await until(outsider, 'error'), { type: 'error', message: 'Could not rejoin that room.' })
+
+    outsider.send({ type: 'resume', playerId: ids[1], code: 'ZZZZ', nickname: 'Sam' })
+    assert.deepEqual(await until(outsider, 'error'), { type: 'error', message: 'Could not rejoin that room.' })
+
+    outsider.send({ type: 'join_room', code, nickname: 'Pat' })
+    assert.deepEqual(await until(outsider, 'error'), { type: 'error', message: 'The game has already started.' })
+
+    const hand = handOf(guestView)
+    const pick = isRecord(guestView.black) && typeof guestView.black.pick === 'number' ? guestView.black.pick : 1
+    guest.send({ type: 'submit_cards', cardIds: hand.slice(0, pick).map((card) => card.id) })
+    const updated = await until(guest, 'game')
+    assert.equal(updated.submitted, true)
+    assert.deepEqual(
+      handOf(updated),
+      hand.filter((card) => !hand.slice(0, pick).some((played) => played.id === card.id)),
+    )
   } finally {
     for (const socket of sockets) socket.close()
     await closeGameServer(gameServer)

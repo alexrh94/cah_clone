@@ -59,6 +59,7 @@ export interface DeckIssue {
 export type Connection = 'connecting' | 'open' | 'closed'
 
 const NICKNAME_KEY = 'cah-nickname'
+const PLAYER_ID_KEY = 'cah-player-id'
 
 export function readNickname(): string {
   try {
@@ -73,6 +74,30 @@ function writeNickname(nickname: string) {
     sessionStorage.setItem(NICKNAME_KEY, nickname)
   } catch {
     // The nickname still goes to the server for this visit.
+  }
+}
+
+function readPlayerId(): string {
+  try {
+    return sessionStorage.getItem(PLAYER_ID_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function writePlayerId(playerId: string) {
+  try {
+    sessionStorage.setItem(PLAYER_ID_KEY, playerId)
+  } catch {
+    // The id still identifies this visit until the tab closes.
+  }
+}
+
+function forgetPlayerId() {
+  try {
+    sessionStorage.removeItem(PLAYER_ID_KEY)
+  } catch {
+    // Leaving still tells the server.
   }
 }
 
@@ -215,11 +240,20 @@ export function useGameServer() {
     const socket = new WebSocket(socketUrl())
     socketRef.current = socket
     let active = true
+    const savedPlayerId = readPlayerId()
+    let awaitingResume = savedPlayerId !== '' && roomCodeFromPath(window.location.pathname) !== null
 
     socket.addEventListener('open', () => {
       if (!active) return
       setConnection('open')
       const code = roomCodeFromPath(window.location.pathname)
+      if (code && savedPlayerId) {
+        acceptRoomRef.current = true
+        setNotice(`Joining room ${code}…`)
+        socket.send(JSON.stringify({ type: 'resume', playerId: savedPlayerId, code, nickname: readNickname() }))
+        return
+      }
+      awaitingResume = false
       if (code) {
         acceptRoomRef.current = true
         setNotice(`Joining room ${code}…`)
@@ -240,7 +274,10 @@ export function useGameServer() {
       if (!isRecord(message) || typeof message.type !== 'string') return
 
       if (message.type === 'connected' && typeof message.playerId === 'string') {
+        if (awaitingResume && message.playerId !== savedPlayerId) return
+        awaitingResume = false
         setPlayerId(message.playerId)
+        writePlayerId(message.playerId)
         return
       }
 
@@ -282,6 +319,10 @@ export function useGameServer() {
         stickyNoticeRef.current = false
         if (cards.length > 0) setDeckIssue({ message: message.message, cards })
         setNotice(message.message)
+        if (message.message === 'Could not rejoin that room.') {
+          awaitingResume = false
+          forgetPlayerId()
+        }
         if (!roomRef.current && roomCodeFromPath(window.location.pathname)) {
           window.history.replaceState(null, '', '/')
         }
@@ -314,6 +355,7 @@ export function useGameServer() {
         return
       }
       acceptRoomRef.current = false
+      forgetPlayerId()
       send({ type: 'leave_room' })
       rememberRoom(null)
       setTable(null)
@@ -374,6 +416,7 @@ export function useGameServer() {
   const leaveRoom = useCallback(() => {
     acceptRoomRef.current = false
     stickyNoticeRef.current = false
+    forgetPlayerId()
     send({ type: 'leave_room' })
     rememberRoom(null)
     setTable(null)
