@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Deck } from './deck.js'
-import { confirmWinner, createGame, nextTurn, removePlayer, submitCards, tzarId, viewFor } from './game.js'
+import { confirmWinner, createGame, nextTurn, removePlayer, requiredCards, submitCards, tzarId, viewFor } from './game.js'
 
 const steady = () => 0.999999
 
@@ -14,6 +14,12 @@ function deck(black: string[], white: string[]): Deck {
 }
 
 const whites = Array.from({ length: 20 }, (_, index) => `w${index}`)
+
+test('requiredCards scales with the number of players', () => {
+  assert.deepEqual(requiredCards(1), { white: 10, black: 2 })
+  assert.deepEqual(requiredCards(3), { white: 30, black: 6 })
+  assert.deepEqual(requiredCards(5), { white: 50, black: 10 })
+})
 
 test('createGame deals a shared hand and refuses a deck that cannot cover the largest pick', () => {
   const players = ['host', 'a', 'b']

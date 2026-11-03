@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { countBlanks, listDecks, loadDeck, UNDERSCORE_MESSAGE, validateDeck } from './deck.js'
+import { combineDecks, countBlanks, listDecks, loadDeck, UNDERSCORE_MESSAGE, validateDeck } from './deck.js'
 
 const sampleDeckPath = fileURLToPath(new URL('../../decks/sample.json', import.meta.url))
 
@@ -53,6 +53,19 @@ test('validateDeck rejects malformed decks', () => {
   assert.equal(validateDeck({ name: 'Ok', black: ['a _', 4], white: ['b'] }).ok, false)
 })
 
+test('combineDecks concatenates cards and keeps duplicate text', () => {
+  const first = { name: 'One', black: [{ text: 'a _', pick: 1 }], white: ['same', 'left'] }
+  const second = { name: 'Two', black: [{ text: 'b __', pick: 2 }], white: ['same', 'right'] }
+  assert.deepEqual(combineDecks([first, second]), {
+    name: 'One + Two',
+    black: [
+      { text: 'a _', pick: 1 },
+      { text: 'b __', pick: 2 },
+    ],
+    white: ['same', 'left', 'same', 'right'],
+  })
+})
+
 test('loadDeck reads the sample deck', () => {
   const deck = loadDeck(sampleDeckPath)
   assert.equal(deck.name, 'Sample')
@@ -69,7 +82,9 @@ test('loadDeck reads the sample deck', () => {
 test('listDecks reads the sample deck and skips other files', () => {
   const decks = listDecks(dirname(sampleDeckPath))
   assert.ok(decks.cards.length === 0)
-  assert.ok(decks.decks.some((deck) => deck.id === 'sample' && deck.name === 'Sample'))
+  assert.ok(
+    decks.decks.some((deck) => deck.id === 'sample' && deck.name === 'Sample' && deck.blackCount === 10 && deck.whiteCount === 40),
+  )
 })
 
 test('listDecks reports black cards that have no underscore', () => {

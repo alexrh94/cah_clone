@@ -20,6 +20,8 @@ export interface Deck {
 export interface DeckSummary {
   id: string
   name: string
+  blackCount: number
+  whiteCount: number
 }
 
 export interface DeckList {
@@ -122,6 +124,14 @@ export function validateDeck(input: unknown): DeckValidation {
   }
 }
 
+export function combineDecks(decks: readonly Deck[]): Deck {
+  return {
+    name: decks.map((deck) => deck.name).join(' + '),
+    black: decks.flatMap((deck) => deck.black.map((card) => ({ text: card.text, pick: card.pick }))),
+    white: decks.flatMap((deck) => deck.white),
+  }
+}
+
 export function loadDeck(filePath: string): Deck {
   let raw: unknown
   try {
@@ -169,7 +179,12 @@ export function listDecks(decksDir: string): DeckList {
       if (result.cards.length === 0) errors.push(`Invalid deck at ${filePath}: ${result.errors.join('; ')}`)
       continue
     }
-    decks.push({ id, name: result.deck.name })
+    decks.push({
+      id,
+      name: result.deck.name,
+      blackCount: result.deck.black.length,
+      whiteCount: result.deck.white.length,
+    })
   }
 
   decks.sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))

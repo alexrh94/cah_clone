@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import { UNDERSCORE_MESSAGE, validateDeck } from './deck'
+import { requiredCards, UNDERSCORE_MESSAGE, validateDeck } from './deck'
 import { GameView } from './GameView'
 import {
   readNickname,
@@ -15,10 +15,11 @@ const ROOM_CODE = /^[A-Z]{4}$/
 
 export function App() {
   const game = useGameServer()
-  const playing = Boolean(game.room && game.playerId && game.table)
+  const inRoom = Boolean(game.room && game.playerId)
+  const playing = Boolean(inRoom && game.table)
 
   return (
-    <main className={playing ? 'table' : 'lobby'}>
+    <main className={playing ? 'table' : inRoom ? 'lobby room-lobby' : 'lobby'}>
       {!playing && (
         <div className="cards" aria-hidden="true">
           <span />
@@ -35,6 +36,7 @@ export function App() {
           onSubmit={game.submitCards}
           onConfirm={game.confirmWinner}
           onNextTurn={game.nextTurn}
+          onReturnToLobby={game.returnToLobby}
           onLeave={game.leaveRoom}
         />
       ) : game.room && game.playerId ? (
@@ -44,7 +46,7 @@ export function App() {
           decks={game.decks}
           notice={game.notice}
           deckIssue={game.deckIssue}
-          onSelectDeck={game.selectDeck}
+          onSelectDecks={game.selectDecks}
           onScoreLimit={game.setScoreLimit}
           onUpload={game.uploadDeck}
           onStart={game.startGame}
@@ -154,7 +156,7 @@ function RoomView({
   decks,
   notice,
   deckIssue,
-  onSelectDeck,
+  onSelectDecks,
   onScoreLimit,
   onUpload,
   onStart,
@@ -165,7 +167,7 @@ function RoomView({
   decks: DeckChoice[]
   notice: string
   deckIssue: DeckIssue | null
-  onSelectDeck: (deckId: string) => void
+  onSelectDecks: (deckIds: string[]) => void
   onScoreLimit: (scoreLimit: number) => void
   onUpload: (deck: { name: string; black: string[]; white: string[] }) => boolean
   onStart: () => void
@@ -174,16 +176,23 @@ function RoomView({
   const [localIssue, setLocalIssue] = useState<DeckIssue | null>(null)
   const isHost = room.hostId === playerId
   const options = [...decks, ...room.customDecks]
-  const canStart = isHost && room.players.length >= 3 && room.deckId !== null
-  const hint = !room.deckId
+  const selected = options.filter((deck) => room.deckIds.includes(deck.id))
+  const blackTotal = selected.reduce((sum, deck) => sum + deck.blackCount, 0)
+  const whiteTotal = selected.reduce((sum, deck) => sum + deck.whiteCount, 0)
+  const minimum = requiredCards(room.players.length)
+  const enoughCards = blackTotal >= minimum.black && whiteTotal >= minimum.white
+  const canStart = isHost && room.players.length >= 3 && enoughCards
+  const hint = room.deckIds.length === 0
     ? isHost
       ? 'Choose a deck for this room.'
       : 'Waiting for the host to choose a deck.'
-    : room.players.length < 3
-      ? 'Waiting for at least three players.'
-      : isHost
-        ? 'Everyone is here. Start the game when you are ready.'
-        : 'Waiting for the host to start the game.'
+    : !enoughCards
+      ? 'Add more cards before the game can start.'
+      : room.players.length < 3
+        ? 'Waiting for at least three players.'
+        : isHost
+          ? 'Everyone is here. Start the game when you are ready.'
+          : 'Waiting for the host to start the game.'
   const issue = localIssue ?? deckIssue
   const message = issue ? '' : notice || hint
 
@@ -221,86 +230,108 @@ function RoomView({
     setLocalIssue(null)
   }
 
+  function toggleDeck(deckId: string) {
+    const next = new Set(room.deckIds)
+    if (next.has(deckId)) next.delete(deckId)
+    else next.add(deckId)
+    onSelectDecks(options.filter((deck) => next.has(deck.id)).map((deck) => deck.id))
+  }
+
   return (
     <>
       <p className="eyebrow">Room code</p>
       <h1 className="room-code">{room.code}</h1>
-      <p className="lede">Share this code with the other players. The host chooses the deck and the score limit.</p>
+      <p className="lede">Share this code with the other players. The host chooses the decks and the score limit.</p>
       <section className="join">
-        <div className="field">
-          <label htmlFor="deck">Deck</label>
-          {options.length === 0 ? (
-            <p className="status">No decks are available.</p>
-          ) : (
-            <select
-              id="deck"
-              name="deck"
-              value={room.deckId ?? ''}
-              disabled={!isHost}
-              onChange={(event) => {
-                if (event.target.value) onSelectDeck(event.target.value)
-              }}
-            >
-              <option value="" disabled>
-                Select a deck
-              </option>
-              {options.map((deck) => (
-                <option key={deck.id} value={deck.id}>
-                  {deck.name}
-                </option>
-              ))}
-            </select>
+        <div className="setup-columns">
+          <div className="field">
+            <p className="deck-heading" id="decks-label">
+              Decks
+            </p>
+            {options.length === 0 ? (
+              <p className="status">No decks are available.</p>
+            ) : (
+              <div className="deck-options" role="group" aria-labelledby="decks-label">
+                {options.map((deck) => (
+                  <label key={deck.id}>
+                    <input
+                      type="checkbox"
+                      name="decks"
+                      value={deck.id}
+                      checked={room.deckIds.includes(deck.id)}
+                      disabled={!isHost}
+                      onChange={() => toggleDeck(deck.id)}
+                    />
+                    {deck.name}
+                  </label>
+                ))}
+              </div>
+            )}
+            <p className="deck-count">
+              {blackTotal} black, {whiteTotal} white
+            </p>
+            <p className="deck-count">
+              Need at least {minimum.black} black and {minimum.white} white
+            </p>
+          </div>
+          <div className="setup-side">
+            <div className="field">
+              <label htmlFor="score-limit">Score limit</label>
+              <input
+                id="score-limit"
+                className="score-limit"
+                name="scoreLimit"
+                type="number"
+                min={1}
+                max={20}
+                step={1}
+                value={room.scoreLimit}
+                disabled={!isHost}
+                onChange={(event) => {
+                  const scoreLimit = Number(event.target.value)
+                  if (Number.isInteger(scoreLimit) && scoreLimit >= 1 && scoreLimit <= 20) onScoreLimit(scoreLimit)
+                }}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor="deck-file">Upload a deck</label>
+              <input
+                id="deck-file"
+                name="deckFile"
+                type="file"
+                accept="application/json,.json"
+                multiple
+                disabled={!isHost}
+                onChange={(event) => {
+                  void uploadFiles(event.target.files)
+                  event.target.value = ''
+                }}
+              />
+            </div>
+          </div>
+          {issue && (
+            <div className="setup-span">
+              <DeckIssueView issue={issue} />
+            </div>
           )}
+          <div className="setup-span">
+            <h2 className="section">Players</h2>
+            <ul className="players">
+              {room.players.map((player, index) => (
+                <li key={player.id}>{playerLabel(player, index, playerId, room.hostId)}</li>
+              ))}
+            </ul>
+            <button type="button" className="start" onClick={() => onStart()} disabled={!canStart}>
+              {enoughCards ? 'Start game' : 'Please add more cards to the deck'}
+            </button>
+            <button type="button" className="secondary" onClick={onLeave}>
+              Leave room
+            </button>
+            <p className="status" role="status">
+              {message}
+            </p>
+          </div>
         </div>
-        <div className="field">
-          <label htmlFor="score-limit">Score limit</label>
-          <input
-            id="score-limit"
-            className="score-limit"
-            name="scoreLimit"
-            type="number"
-            min={1}
-            max={20}
-            step={1}
-            value={room.scoreLimit}
-            disabled={!isHost}
-            onChange={(event) => {
-              const scoreLimit = Number(event.target.value)
-              if (Number.isInteger(scoreLimit) && scoreLimit >= 1 && scoreLimit <= 20) onScoreLimit(scoreLimit)
-            }}
-          />
-        </div>
-        <div className="field">
-          <label htmlFor="deck-file">Upload a deck</label>
-          <input
-            id="deck-file"
-            name="deckFile"
-            type="file"
-            accept="application/json,.json"
-            multiple
-            disabled={!isHost}
-            onChange={(event) => {
-              void uploadFiles(event.target.files)
-              event.target.value = ''
-            }}
-          />
-        </div>
-        {issue && <DeckIssueView issue={issue} />}
-        <h2 className="section">Players</h2>
-        <ul className="players">
-          {room.players.map((player, index) => (
-            <li key={player.id}>{playerLabel(player, index, playerId, room.hostId)}</li>
-          ))}
-        </ul>
-        <button type="button" className="start" onClick={() => onStart()} disabled={!canStart}>
-          Start game
-        </button>
-        <button type="button" className="secondary" onClick={onLeave}>
-          Leave room
-        </button>
-        <p className="status" role="status">
-          {message}
-        </p>
       </section>
     </>
   )

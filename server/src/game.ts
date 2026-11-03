@@ -3,6 +3,13 @@ import type { BlackCard, Deck } from './deck.js'
 export const TARGET_HAND_SIZE = 10
 export const MIN_PLAYERS = 3
 
+/** White cards cover one full hand per player. Black cards are at least 20% of that white minimum. Keep this in step with requiredCards in client/src/deck.ts. */
+export function requiredCards(playerCount: number): { black: number; white: number } {
+  const white = playerCount * TARGET_HAND_SIZE
+  const black = Math.ceil(white * 0.2)
+  return { black, white }
+}
+
 export interface HandCard {
   id: string
   text: string

@@ -3,8 +3,8 @@ import { createReadStream } from 'node:fs'
 import http from 'node:http'
 import { join } from 'node:path'
 import { WebSocket, WebSocketServer, type RawData } from 'ws'
-import { listDecks, loadDeck, MAX_DECK_BYTES, UNDERSCORE_MESSAGE, validateDeck, type Deck, type DeckList } from './deck.js'
-import { confirmWinner, createGame, nextTurn, removePlayer, submitCards, viewFor, type GameState } from './game.js'
+import { combineDecks, listDecks, loadDeck, MAX_DECK_BYTES, UNDERSCORE_MESSAGE, validateDeck, type Deck, type DeckList } from './deck.js'
+import { confirmWinner, createGame, nextTurn, removePlayer, requiredCards, submitCards, viewFor, type GameState } from './game.js'
 import { generateUniqueRoomCode } from './roomCode.js'
 import { createRoomStore, type PublicRoom, type RoomChange } from './rooms.js'
 import { contentTypeFor, resolveClientFile } from './static.js'
@@ -33,13 +33,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 type ClientMessage =
   | { type: 'create_room'; nickname: string }
   | { type: 'join_room'; code: string; nickname: string }
-  | { type: 'select_deck'; deckId: string }
+  | { type: 'select_decks'; deckIds: string[] }
   | { type: 'set_score_limit'; scoreLimit: number }
   | { type: 'upload_deck'; deck: unknown }
   | { type: 'start_game' }
   | { type: 'submit_cards'; cardIds: string[] }
   | { type: 'confirm_winner'; submissionId: string }
   | { type: 'next_turn' }
+  | { type: 'return_to_lobby' }
   | { type: 'leave_room' }
 
 export function cleanNickname(value: string): string {
@@ -62,8 +63,12 @@ function parseClientMessage(value: unknown): ClientMessage | null {
   if (value.type === 'join_room' && typeof value.code === 'string') {
     return { type: 'join_room', code: value.code, nickname: readNickname(value.nickname) }
   }
-  if (value.type === 'select_deck' && typeof value.deckId === 'string') {
-    return { type: 'select_deck', deckId: value.deckId }
+  if (
+    value.type === 'select_decks' &&
+    Array.isArray(value.deckIds) &&
+    value.deckIds.every((deckId) => typeof deckId === 'string')
+  ) {
+    return { type: 'select_decks', deckIds: value.deckIds }
   }
   if (value.type === 'set_score_limit' && typeof value.scoreLimit === 'number') {
     return { type: 'set_score_limit', scoreLimit: value.scoreLimit }
@@ -76,6 +81,7 @@ function parseClientMessage(value: unknown): ClientMessage | null {
     return { type: 'confirm_winner', submissionId: value.submissionId }
   }
   if (value.type === 'next_turn') return { type: 'next_turn' }
+  if (value.type === 'return_to_lobby') return { type: 'return_to_lobby' }
   return null
 }
 
@@ -151,7 +157,7 @@ export function createGameServer(
     const message = {
       type: 'room',
       code: room.code,
-      deckId: room.deckId,
+      deckIds: room.deckIds,
       scoreLimit: room.scoreLimit,
       hostId: room.hostId,
       playerIds: room.playerIds,
@@ -322,7 +328,7 @@ export function createGameServer(
         return
       }
 
-      if (message.type === 'select_deck' || message.type === 'set_score_limit' || message.type === 'upload_deck') {
+      if (message.type === 'select_decks' || message.type === 'set_score_limit' || message.type === 'upload_deck') {
         const currentCode = rooms.codeFor(playerId)
         if (currentCode && games.has(currentCode)) {
           sendError(socket, 'The game has already started.')
@@ -330,7 +336,7 @@ export function createGameServer(
         }
       }
 
-      if (message.type === 'select_deck') {
+      if (message.type === 'select_decks') {
         const code = rooms.codeFor(playerId)
         if (!code) {
           sendError(socket, 'Join a room before choosing a deck.')
@@ -341,7 +347,7 @@ export function createGameServer(
           sendError(socket, 'The deck list could not be read.')
           return
         }
-        const result = rooms.selectDeck(playerId, message.deckId, known)
+        const result = rooms.selectDecks(playerId, message.deckIds, known)
         if (!result.ok) {
           sendError(socket, result.error)
           return
@@ -395,16 +401,26 @@ export function createGameServer(
           sendError(socket, 'At least three players are needed to start.')
           return
         }
-        if (!current.deckId) {
+        if (current.deckIds.length === 0) {
           sendError(socket, 'Choose a deck before starting.')
           return
         }
-        const loaded = resolveDeck(code, current.deckId)
-        if (!loaded.ok) {
-          sendError(socket, loaded.error)
+        const parts: Deck[] = []
+        for (const deckId of current.deckIds) {
+          const loaded = resolveDeck(code, deckId)
+          if (!loaded.ok) {
+            sendError(socket, loaded.error)
+            return
+          }
+          parts.push(loaded.deck)
+        }
+        const deck = combineDecks(parts)
+        const need = requiredCards(current.playerIds.length)
+        if (deck.black.length < need.black || deck.white.length < need.white) {
+          sendError(socket, 'Please add more cards to the deck.')
           return
         }
-        const created = createGame(current.playerIds, current.hostId, loaded.deck, current.scoreLimit, random)
+        const created = createGame(current.playerIds, current.hostId, deck, current.scoreLimit, random)
         if (!created.ok) {
           sendError(socket, created.error)
           return
@@ -467,6 +483,27 @@ export function createGameServer(
           games.delete(code)
         }
         publish(room)
+        return
+      }
+
+      if (message.type === 'return_to_lobby') {
+        const code = rooms.codeFor(playerId)
+        const current = code ? rooms.get(code) : undefined
+        if (!current || !code) {
+          sendError(socket, 'Join a room before returning to the lobby.')
+          return
+        }
+        if (current.hostId !== playerId) {
+          sendError(socket, 'Only the host can return to the lobby.')
+          return
+        }
+        if (!games.has(code)) {
+          sendError(socket, 'The game has not started.')
+          return
+        }
+        games.delete(code)
+        notify(current, 'The host returned the room to the lobby.')
+        publish(current)
         return
       }
 

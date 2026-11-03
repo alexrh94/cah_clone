@@ -193,6 +193,8 @@ test('the host can set a score limit and upload a deck', async () => {
     assert.equal(Array.isArray(uploaded.customDecks) && uploaded.customDecks.length, 1)
     const custom = Array.isArray(uploaded.customDecks) ? uploaded.customDecks[0] : null
     assert.equal(isRecord(custom) && custom.name, 'Custom')
+    assert.equal(isRecord(custom) && custom.blackCount, 1)
+    assert.equal(isRecord(custom) && custom.whiteCount, 1)
 
     guest.send({ type: 'join_room', code, nickname: 'Sam' })
     const guestRoom = await until(guest, 'room')
@@ -208,6 +210,124 @@ test('the host can set a score limit and upload a deck', async () => {
   } finally {
     hostSocket.close()
     guestSocket.close()
+    await closeGameServer(gameServer)
+  }
+})
+
+test('start rejects a short selection and deals the combined decks', async () => {
+  const clientDir = mkdtempSync(join(tmpdir(), 'cah-serve-'))
+  writeFileSync(join(clientDir, 'index.html'), '<h1>Cards Against Humanity</h1>')
+  const gameServer = createGameServer(clientDir, sampleDecksDir)
+  const port = await listen(gameServer, 0)
+  const url = `ws://127.0.0.1:${port}/ws`
+  const sockets = [new WebSocket(url), new WebSocket(url), new WebSocket(url)]
+  const clients = sockets.map(track)
+  const host = clients[0]
+  if (!host) throw new Error('missing host')
+
+  function lines(prefix: string, count: number, blank: boolean): string[] {
+    return Array.from({ length: count }, (_, index) => (blank ? `${prefix} ${index} _.` : `${prefix} ${index}`))
+  }
+
+  function customId(room: Record<string, unknown>, name: string): string {
+    if (!Array.isArray(room.customDecks)) return ''
+    const match = room.customDecks.find((deck) => isRecord(deck) && deck.name === name)
+    return isRecord(match) && typeof match.id === 'string' ? match.id : ''
+  }
+
+  try {
+    for (const client of clients) {
+      await until(client, 'connected')
+      await until(client, 'decks')
+    }
+
+    host.send({ type: 'create_room', nickname: 'Alex' })
+    let room = await until(host, 'room')
+    const code = typeof room.code === 'string' ? room.code : ''
+    clients[1]?.send({ type: 'join_room', code, nickname: 'Sam' })
+    clients[2]?.send({ type: 'join_room', code, nickname: 'Jo' })
+    while (!Array.isArray(room.playerIds) || room.playerIds.length < 3) room = await until(host, 'room')
+
+    host.send({ type: 'start_game' })
+    assert.equal((await until(host, 'error')).message, 'Choose a deck before starting.')
+
+    host.send({
+      type: 'upload_deck',
+      deck: { name: 'Half A', black: lines('A', 3, true), white: lines('a', 15, false) },
+    })
+    const first = await until(host, 'room')
+    const halfA = customId(first, 'Half A')
+    host.send({
+      type: 'upload_deck',
+      deck: { name: 'Half B', black: lines('B', 3, true), white: lines('b', 15, false) },
+    })
+    const second = await until(host, 'room')
+    const halfB = customId(second, 'Half B')
+    assert.equal(halfA.startsWith('custom:'), true)
+    assert.equal(halfB.startsWith('custom:'), true)
+
+    host.send({ type: 'select_decks', deckIds: [halfA] })
+    assert.deepEqual((await until(host, 'room')).deckIds, [halfA])
+    host.send({ type: 'start_game' })
+    assert.equal((await until(host, 'error')).message, 'Please add more cards to the deck.')
+
+    host.send({ type: 'select_decks', deckIds: [halfA, halfB] })
+    assert.deepEqual((await until(host, 'room')).deckIds, [halfA, halfB])
+    host.send({ type: 'start_game' })
+    const started = await until(host, 'game')
+    const hand = isRecord(started.you) && Array.isArray(started.you.hand) ? started.you.hand : []
+    assert.equal(hand.length, 10)
+  } finally {
+    for (const socket of sockets) socket.close()
+    await closeGameServer(gameServer)
+  }
+})
+
+test('the host can return a game to the lobby', async () => {
+  const clientDir = mkdtempSync(join(tmpdir(), 'cah-serve-'))
+  writeFileSync(join(clientDir, 'index.html'), '<h1>Cards Against Humanity</h1>')
+  const gameServer = createGameServer(clientDir, sampleDecksDir)
+  const port = await listen(gameServer, 0)
+  const url = `ws://127.0.0.1:${port}/ws`
+  const sockets = [new WebSocket(url), new WebSocket(url), new WebSocket(url)]
+  const clients = sockets.map(track)
+  const host = clients[0]
+  const guest = clients[1]
+  if (!host || !guest) throw new Error('missing player')
+
+  try {
+    for (const client of clients) {
+      await until(client, 'connected')
+      await until(client, 'decks')
+    }
+
+    host.send({ type: 'create_room', nickname: 'Alex' })
+    let room = await until(host, 'room')
+    const code = typeof room.code === 'string' ? room.code : ''
+    guest.send({ type: 'join_room', code, nickname: 'Sam' })
+    clients[2]?.send({ type: 'join_room', code, nickname: 'Jo' })
+    while (!Array.isArray(room.playerIds) || room.playerIds.length < 3) room = await until(host, 'room')
+
+    host.send({ type: 'select_decks', deckIds: ['sample'] })
+    await until(host, 'room')
+    host.send({ type: 'start_game' })
+    await until(host, 'game')
+
+    guest.send({ type: 'return_to_lobby' })
+    assert.equal((await until(guest, 'error')).message, 'Only the host can return to the lobby.')
+
+    host.send({ type: 'return_to_lobby' })
+    assert.equal((await until(host, 'notice')).message, 'The host returned the room to the lobby.')
+    const lobby = await until(host, 'room')
+    assert.equal(lobby.code, code)
+    assert.deepEqual(lobby.deckIds, ['sample'])
+    assert.equal(Array.isArray(lobby.playerIds) && lobby.playerIds.length, 3)
+    assert.equal((await until(guest, 'notice')).message, 'The host returned the room to the lobby.')
+
+    host.send({ type: 'start_game' })
+    assert.equal((await until(host, 'game')).phase, 'picking')
+  } finally {
+    for (const socket of sockets) socket.close()
     await closeGameServer(gameServer)
   }
 })
@@ -241,7 +361,7 @@ test('a round awards a point and the score limit returns the room to the lobby',
     await until(others[0] as ReturnType<typeof track>, 'room')
     await until(others[1] as ReturnType<typeof track>, 'room')
 
-    host.send({ type: 'select_deck', deckId: 'sample' })
+    host.send({ type: 'select_decks', deckIds: ['sample'] })
     host.send({ type: 'set_score_limit', scoreLimit: 1 })
     host.send({ type: 'start_game' })
 
@@ -273,7 +393,7 @@ test('a round awards a point and the score limit returns the room to the lobby',
     assert.match(String(notice.message), /reached 1 and wins/)
     const lobby = await until(host, 'room')
     assert.equal(lobby.code, code)
-    assert.equal(lobby.deckId, 'sample')
+    assert.deepEqual(lobby.deckIds, ['sample'])
   } finally {
     for (const socket of sockets) socket.close()
     await closeGameServer(gameServer)

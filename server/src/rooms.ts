@@ -8,12 +8,14 @@ export const MAX_SCORE_LIMIT = 20
 export interface CustomDeckSummary {
   id: string
   name: string
+  blackCount: number
+  whiteCount: number
 }
 
 export interface PublicRoom {
   code: string
   hostId: string
-  deckId: string | null
+  deckIds: string[]
   scoreLimit: number
   playerIds: string[]
   customDecks: CustomDeckSummary[]
@@ -31,7 +33,7 @@ export type RoomResult =
 export interface RoomStore {
   create(hostId: string, code: string): RoomResult
   join(playerId: string, code: string): RoomResult
-  selectDeck(playerId: string, deckId: string, knownDeckIds: ReadonlySet<string>): RoomResult
+  selectDecks(playerId: string, deckIds: readonly string[], knownDeckIds: ReadonlySet<string>): RoomResult
   setScoreLimit(playerId: string, scoreLimit: number): RoomResult
   addCustomDeck(playerId: string, id: string, deck: Deck): RoomResult
   getCustomDeck(code: string, id: string): Deck | undefined
@@ -45,7 +47,7 @@ export interface RoomStore {
 interface InternalRoom {
   code: string
   hostId: string
-  deckId: string | null
+  deckIds: string[]
   scoreLimit: number
   playerIds: string[]
   customDecks: Map<string, Deck>
@@ -53,7 +55,7 @@ interface InternalRoom {
 
 function customSummaries(room: InternalRoom): CustomDeckSummary[] {
   return [...room.customDecks.entries()]
-    .map(([id, deck]) => ({ id, name: deck.name }))
+    .map(([id, deck]) => ({ id, name: deck.name, blackCount: deck.black.length, whiteCount: deck.white.length }))
     .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
 }
 
@@ -61,7 +63,7 @@ function snapshot(room: InternalRoom): PublicRoom {
   return {
     code: room.code,
     hostId: room.hostId,
-    deckId: room.deckId,
+    deckIds: [...room.deckIds],
     scoreLimit: room.scoreLimit,
     playerIds: [...room.playerIds],
     customDecks: customSummaries(room),
@@ -128,7 +130,7 @@ export function createRoomStore(): RoomStore {
       const room: InternalRoom = {
         code,
         hostId,
-        deckId: null,
+        deckIds: [],
         scoreLimit: DEFAULT_SCORE_LIMIT,
         playerIds: [hostId],
         customDecks: new Map(),
@@ -160,7 +162,7 @@ export function createRoomStore(): RoomStore {
       return { ok: true, room: snapshot(room), previous }
     },
 
-    selectDeck(playerId, deckId, knownDeckIds) {
+    selectDecks(playerId, deckIds, knownDeckIds) {
       const room = roomFor(playerId)
       if (!room) {
         return { ok: false, error: 'Join a room before choosing a deck.' }
@@ -168,11 +170,17 @@ export function createRoomStore(): RoomStore {
       if (room.hostId !== playerId) {
         return { ok: false, error: 'Only the host can choose the deck.' }
       }
-      if (!knownDeckIds.has(deckId)) {
-        return { ok: false, error: 'That deck is not available.' }
+
+      const unique: string[] = []
+      for (const deckId of deckIds) {
+        if (unique.includes(deckId)) continue
+        if (!knownDeckIds.has(deckId)) {
+          return { ok: false, error: 'That deck is not available.' }
+        }
+        unique.push(deckId)
       }
 
-      room.deckId = deckId
+      room.deckIds = unique
       return { ok: true, room: snapshot(room), previous: null }
     },
 

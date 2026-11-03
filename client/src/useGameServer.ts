@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 export interface DeckChoice {
   id: string
   name: string
+  blackCount: number
+  whiteCount: number
 }
 
 export interface RoomPlayer {
@@ -12,7 +14,7 @@ export interface RoomPlayer {
 
 export interface RoomState {
   code: string
-  deckId: string | null
+  deckIds: string[]
   scoreLimit: number
   hostId: string
   players: RoomPlayer[]
@@ -88,8 +90,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
+}
+
 function isDeckChoice(value: unknown): value is DeckChoice {
-  return isRecord(value) && typeof value.id === 'string' && typeof value.name === 'string'
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    isCount(value.blackCount) &&
+    isCount(value.whiteCount)
+  )
 }
 
 function isRoomPlayer(value: unknown): value is RoomPlayer {
@@ -117,13 +129,13 @@ function isSubmission(value: unknown): value is PublicSubmission {
 function readRoom(value: unknown): RoomState | null {
   if (!isRecord(value) || value.type !== 'room') return null
   if (typeof value.code !== 'string' || typeof value.hostId !== 'string') return null
-  if (typeof value.deckId !== 'string' && value.deckId !== null) return null
+  if (!Array.isArray(value.deckIds) || !value.deckIds.every((deckId) => typeof deckId === 'string')) return null
   if (typeof value.scoreLimit !== 'number' || !Number.isInteger(value.scoreLimit)) return null
   if (!Array.isArray(value.players) || !value.players.every(isRoomPlayer)) return null
   if (!Array.isArray(value.customDecks) || !value.customDecks.every(isDeckChoice)) return null
   return {
     code: value.code,
-    deckId: value.deckId,
+    deckIds: value.deckIds,
     scoreLimit: value.scoreLimit,
     hostId: value.hostId,
     players: value.players,
@@ -334,9 +346,9 @@ export function useGameServer() {
     [send],
   )
 
-  const selectDeck = useCallback(
-    (deckId: string) => {
-      if (!send({ type: 'select_deck', deckId })) return
+  const selectDecks = useCallback(
+    (deckIds: string[]) => {
+      if (!send({ type: 'select_decks', deckIds })) return
       setNotice('')
     },
     [send],
@@ -400,6 +412,11 @@ export function useGameServer() {
     return true
   }, [send])
 
+  const returnToLobby = useCallback(() => {
+    if (!send({ type: 'return_to_lobby' })) return false
+    return true
+  }, [send])
+
   return {
     connection,
     playerId,
@@ -410,7 +427,7 @@ export function useGameServer() {
     deckIssue,
     createRoom,
     joinRoom,
-    selectDeck,
+    selectDecks,
     setScoreLimit,
     uploadDeck,
     leaveRoom,
@@ -418,5 +435,6 @@ export function useGameServer() {
     submitCards,
     confirmWinner,
     nextTurn,
+    returnToLobby,
   }
 }

@@ -2,6 +2,13 @@ export const UNDERSCORE_MESSAGE = 'Black card must contain at least one undersco
 export const MAX_BLACK_CARDS = 500
 export const MAX_WHITE_CARDS = 2000
 
+/** White cards cover one full hand per player. Black cards are at least 20% of that white minimum. Keep this in step with requiredCards in server/src/game.ts. */
+export function requiredCards(playerCount: number): { black: number; white: number } {
+  const white = playerCount * 10
+  const black = Math.ceil(white * 0.2)
+  return { black, white }
+}
+
 export interface BlackCard {
   text: string
   pick: number

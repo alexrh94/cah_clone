@@ -21,7 +21,7 @@ test('create opens a room hosted by that player', () => {
   assert.deepEqual(created.room, {
     code: 'ABCD',
     hostId: 'host',
-    deckId: null,
+    deckIds: [],
     scoreLimit: DEFAULT_SCORE_LIMIT,
     playerIds: ['host'],
     customDecks: [],
@@ -76,18 +76,25 @@ test('join rejects an unknown room and reports a player leaving another room', (
   assert.deepEqual(store.get('WXYZ')?.playerIds, ['other', 'guest'])
 })
 
-test('selectDeck lets the host choose a known deck', () => {
+test('selectDecks lets the host replace the selected set', () => {
   const store = createRoomStore()
   assert.equal(store.create('host', 'ABCD').ok, true)
   assert.equal(store.join('guest', 'ABCD').ok, true)
-  assert.equal(store.selectDeck('guest', 'sample', decks).ok, false)
-  assert.equal(store.selectDeck('host', 'missing', decks).ok, false)
-  assert.equal(store.selectDeck('outsider', 'sample', decks).ok, false)
+  assert.equal(store.selectDecks('guest', ['sample'], decks).ok, false)
+  assert.equal(store.selectDecks('outsider', ['sample'], decks).ok, false)
 
-  const selected = store.selectDeck('host', 'sample', decks)
+  const selected = store.selectDecks('host', ['sample', 'sample'], decks)
   assert.equal(selected.ok, true)
   if (!selected.ok) return
-  assert.equal(selected.room.deckId, 'sample')
+  assert.deepEqual(selected.room.deckIds, ['sample'])
+
+  assert.equal(store.selectDecks('host', ['sample', 'missing'], decks).ok, false)
+  assert.deepEqual(store.get('ABCD')?.deckIds, ['sample'])
+
+  const cleared = store.selectDecks('host', [], decks)
+  assert.equal(cleared.ok, true)
+  if (!cleared.ok) return
+  assert.deepEqual(cleared.room.deckIds, [])
 })
 
 test('setScoreLimit accepts a host value from 1 to 20', () => {
@@ -114,7 +121,7 @@ test('custom decks stay with the room until it is dropped', () => {
   const added = store.addCustomDeck('host', 'custom:1', customDeck)
   assert.equal(added.ok, true)
   if (!added.ok) return
-  assert.deepEqual(added.room.customDecks, [{ id: 'custom:1', name: 'Custom' }])
+  assert.deepEqual(added.room.customDecks, [{ id: 'custom:1', name: 'Custom', blackCount: 1, whiteCount: 1 }])
   assert.equal(store.getCustomDeck('ABCD', 'custom:1')?.name, 'Custom')
 
   assert.equal(store.leave('guest')?.room?.playerIds.length, 1)

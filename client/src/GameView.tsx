@@ -9,6 +9,7 @@ export function GameView({
   onSubmit,
   onConfirm,
   onNextTurn,
+  onReturnToLobby,
   onLeave,
 }: {
   room: RoomState
@@ -18,11 +19,13 @@ export function GameView({
   onSubmit: (cardIds: string[]) => boolean
   onConfirm: (submissionId: string) => boolean
   onNextTurn: () => boolean
+  onReturnToLobby: () => boolean
   onLeave: () => void
 }) {
   const [selected, setSelected] = useState<string[]>([])
   const [choice, setChoice] = useState<string | null>(null)
   const isTzar = table.tzarId === playerId
+  const isHost = room.hostId === playerId
   const readyToPlay = selected.length === table.black.pick
   const winner = table.lastWinnerId ? playerName(room, table.lastWinnerId, playerId) : null
   const showHand = !isTzar && table.phase === 'picking' && !table.submitted
@@ -64,8 +67,8 @@ export function GameView({
             )
           })}
         </ol>
-        <button type="button" className="leave" onClick={onLeave}>
-          Leave
+        <button type="button" className="leave" onClick={isHost ? onReturnToLobby : onLeave}>
+          {isHost ? 'Return to lobby' : 'Leave'}
         </button>
       </aside>
 
