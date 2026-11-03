@@ -243,13 +243,19 @@ h1.room-code {
 }
 
 .players {
+  display: flex;
+  flex-wrap: wrap;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.players li + li {
-  margin-top: 0.25rem;
+.players li:not(:last-child)::after {
+  content: ',\00a0';
+}
+
+.players strong {
+  font-weight: 700;
 }
 
 .status {
@@ -291,8 +297,13 @@ mark {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: min(30vh, calc(100vh - 26rem));
+  padding-top: 5rem;
   overflow: hidden;
+}
+
+.table-screen.is-spread .stage {
+  flex: 0 1 auto;
+  width: calc(100% - 2rem);
 }
 
 .scoreboard {
@@ -364,10 +375,10 @@ mark {
 
 .black-card,
 .submission {
-  width: min(28rem, 100%);
-  min-height: 11rem;
+  width: min(13.5rem, 100%);
+  min-height: 19rem;
   margin: 0;
-  padding: 1.4rem 1.5rem;
+  padding: 1.2rem 1.05rem;
   border: 0;
   border-radius: 0.75rem;
   background: #1c1c1c;
@@ -382,7 +393,7 @@ mark {
   align-items: stretch;
   align-self: stretch;
   justify-content: flex-start;
-  width: min(22rem, 100%);
+  width: min(13.5rem, 100%);
   background: #1c1c1c;
   color: #f4efe6;
   text-align: left;
@@ -398,7 +409,7 @@ button.submission:hover {
 
 .prompt {
   margin: 0;
-  font-size: 1.35rem;
+  font-size: 1.15rem;
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.35;
@@ -483,9 +494,15 @@ button.submission:hover {
 }
 
 .hand-bar {
+  position: relative;
+  z-index: 1;
   flex: none;
   width: calc(100% - 2rem);
   padding-bottom: 1rem;
+}
+
+.hand-bar.is-docked {
+  margin-top: auto;
 }
 
 .hand {
@@ -493,6 +510,11 @@ button.submission:hover {
   grid-template-columns: repeat(10, minmax(0, 1fr));
   gap: 0.55rem;
   padding-bottom: 0.4rem;
+}
+
+.hand.is-locked .white-card {
+  opacity: 0.62;
+  cursor: default;
 }
 
 .white-card {
@@ -553,9 +575,14 @@ button.submission:hover {
     margin: 0;
   }
 
-  .table-screen {
+  .table-screen,
+  .table-screen.is-spread {
     align-items: center;
     padding-top: 0.5rem;
+  }
+
+  .table-screen.is-spread .stage {
+    width: min(64rem, calc(100% - 2rem));
   }
 
   .stage {
@@ -579,8 +606,10 @@ button.submission:hover {
     min-height: 7.25rem;
   }
 
-  .black-card {
-    min-height: 8.5rem;
-    padding: 1rem 1.1rem;
+  .black-card,
+  .submission {
+    width: min(11.5rem, 100%);
+    min-height: 16rem;
+    padding: 1rem 0.85rem;
   }
 }

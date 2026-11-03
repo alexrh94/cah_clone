@@ -29,6 +29,8 @@ export function GameView({
   const readyToPlay = selected.length === table.black.pick
   const winner = table.lastWinnerId ? playerName(room, table.lastWinnerId, playerId) : null
   const showHand = !isTzar && table.phase === 'picking' && !table.submitted
+  const showTzarHand = isTzar && table.phase === 'picking'
+  const spread = table.phase === 'judging' || table.phase === 'reveal'
 
   useEffect(() => {
     setSelected([])
@@ -49,7 +51,7 @@ export function GameView({
   }
 
   return (
-    <div className="table-screen">
+    <div className={spread ? 'table-screen is-spread' : 'table-screen'}>
       <aside className="scoreboard" aria-label="Scores">
         <p className="scoreboard-title">Scores</p>
         <ol>
@@ -107,7 +109,16 @@ export function GameView({
         )}
       </section>
 
-      <section className="hand-bar" aria-label="Your hand">
+      <section className={isTzar && table.phase === 'judging' ? 'hand-bar is-docked' : 'hand-bar'} aria-label="Your hand">
+        {showTzarHand && (
+          <div className="hand is-locked">
+            {table.you.hand.map((card) => (
+              <div key={card.id} className="white-card">
+                {card.text}
+              </div>
+            ))}
+          </div>
+        )}
         {showHand ? (
           <>
             <div className="hand">

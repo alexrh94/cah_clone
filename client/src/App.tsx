@@ -317,9 +317,10 @@ function RoomView({
           <div className="setup-span">
             <h2 className="section">Players</h2>
             <ul className="players">
-              {room.players.map((player, index) => (
-                <li key={player.id}>{playerLabel(player, index, playerId, room.hostId)}</li>
-              ))}
+              {room.players.map((player, index) => {
+                const label = playerLabel(player, index, playerId)
+                return <li key={player.id}>{player.id === room.hostId ? <strong>{label}</strong> : label}</li>
+              })}
             </ul>
             <button type="button" className="start" onClick={() => onStart()} disabled={!canStart}>
               {enoughCards ? 'Start game' : 'Please add more cards to the deck'}
@@ -354,9 +355,8 @@ export function DeckIssueView({ issue }: { issue: DeckIssue }) {
   )
 }
 
-function playerLabel(player: RoomPlayer, index: number, playerId: string, hostId: string): string {
+function playerLabel(player: RoomPlayer, index: number, playerId: string): string {
   const named = player.nickname !== ''
   const name = named ? player.nickname : player.id === playerId ? 'You' : `Player ${index + 1}`
-  const label = named && player.id === playerId ? `${name} (you)` : name
-  return player.id === hostId ? `${label}, host` : label
+  return named && player.id === playerId ? `${name} (you)` : name
 }
