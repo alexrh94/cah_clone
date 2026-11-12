@@ -216,6 +216,15 @@ export function useGameServer() {
   const [table, setTable] = useState<TableState | null>(null)
   const [notice, setNotice] = useState('Connecting to the game server…')
   const [deckIssue, setDeckIssue] = useState<DeckIssue | null>(null)
+  const [inviteCode, setInviteCode] = useState<string | null>(() => {
+    const code = roomCodeFromPath(window.location.pathname)
+    if (!code || readPlayerId()) return null
+    return code
+  })
+  const [pendingCode, setPendingCode] = useState<string | null>(() => {
+    const code = roomCodeFromPath(window.location.pathname)
+    return code && readPlayerId() ? code : null
+  })
   const socketRef = useRef<WebSocket | null>(null)
   const roomRef = useRef<RoomState | null>(null)
   const acceptRoomRef = useRef(true)
@@ -242,6 +251,8 @@ export function useGameServer() {
     let active = true
     const savedPlayerId = readPlayerId()
     let awaitingResume = savedPlayerId !== '' && roomCodeFromPath(window.location.pathname) !== null
+    let activePlayerId: string | null = null
+    let provisionalPlayerId: string | null = null
 
     socket.addEventListener('open', () => {
       if (!active) return
@@ -249,17 +260,20 @@ export function useGameServer() {
       const code = roomCodeFromPath(window.location.pathname)
       if (code && savedPlayerId) {
         acceptRoomRef.current = true
+        setInviteCode(null)
+        setPendingCode(code)
         setNotice(`Joining room ${code}…`)
         socket.send(JSON.stringify({ type: 'resume', playerId: savedPlayerId, code, nickname: readNickname() }))
         return
       }
       awaitingResume = false
+      setPendingCode(null)
       if (code) {
-        acceptRoomRef.current = true
-        setNotice(`Joining room ${code}…`)
-        socket.send(JSON.stringify({ type: 'join_room', code, nickname: readNickname() }))
+        setInviteCode(code)
+        setNotice('')
         return
       }
+      setInviteCode(null)
       setNotice('Ask the host for a four-letter code, or create a room.')
     })
 
@@ -274,10 +288,14 @@ export function useGameServer() {
       if (!isRecord(message) || typeof message.type !== 'string') return
 
       if (message.type === 'connected' && typeof message.playerId === 'string') {
-        if (awaitingResume && message.playerId !== savedPlayerId) return
+        if (awaitingResume && message.playerId !== savedPlayerId) {
+          provisionalPlayerId = message.playerId
+          return
+        }
         awaitingResume = false
+        activePlayerId = message.playerId
         setPlayerId(message.playerId)
-        writePlayerId(message.playerId)
+        if (message.playerId === savedPlayerId) writePlayerId(message.playerId)
         return
       }
 
@@ -289,8 +307,14 @@ export function useGameServer() {
       const nextRoom = readRoom(message)
       if (nextRoom) {
         if (!acceptRoomRef.current) return
+        if (activePlayerId) {
+          setPlayerId(activePlayerId)
+          writePlayerId(activePlayerId)
+        }
         if (roomRef.current?.code !== nextRoom.code) setTable(null)
         rememberRoom(nextRoom)
+        setInviteCode(null)
+        setPendingCode(null)
         setDeckIssue(null)
         const path = `/room/${nextRoom.code}`
         if (window.location.pathname !== path) window.history.pushState(null, '', path)
@@ -322,9 +346,20 @@ export function useGameServer() {
         if (message.message === 'Could not rejoin that room.') {
           awaitingResume = false
           forgetPlayerId()
+          if (provisionalPlayerId) {
+            activePlayerId = provisionalPlayerId
+            setPlayerId(provisionalPlayerId)
+          }
         }
-        if (!roomRef.current && roomCodeFromPath(window.location.pathname)) {
-          window.history.replaceState(null, '', '/')
+        if (!roomRef.current) {
+          const code = roomCodeFromPath(window.location.pathname)
+          if (code) {
+            setPendingCode(null)
+            setInviteCode(code)
+            if (message.message === 'Could not rejoin that room.') {
+              setNotice('That seat expired. Choose a nickname to join again.')
+            }
+          }
         }
       }
     })
@@ -332,6 +367,8 @@ export function useGameServer() {
     socket.addEventListener('close', () => {
       if (!active) return
       setConnection('closed')
+      setInviteCode(null)
+      setPendingCode(null)
       rememberRoom(null)
       setTable(null)
       setNotice('The game server disconnected.')
@@ -348,17 +385,27 @@ export function useGameServer() {
   useEffect(() => {
     function onPopState() {
       const code = roomCodeFromPath(window.location.pathname)
-      if (code) {
-        acceptRoomRef.current = true
-        setNotice(`Joining room ${code}…`)
-        send({ type: 'join_room', code, nickname: readNickname() })
+      if (code && roomRef.current?.code === code) {
+        setInviteCode(null)
+        setPendingCode(null)
         return
       }
-      acceptRoomRef.current = false
-      forgetPlayerId()
-      send({ type: 'leave_room' })
-      rememberRoom(null)
-      setTable(null)
+      if (roomRef.current) {
+        acceptRoomRef.current = false
+        stickyNoticeRef.current = false
+        forgetPlayerId()
+        send({ type: 'leave_room' })
+        rememberRoom(null)
+        setTable(null)
+      }
+      if (code) {
+        setPendingCode(null)
+        setInviteCode(code)
+        setNotice('')
+        return
+      }
+      setInviteCode(null)
+      setPendingCode(null)
       setNotice('Ask the host for a four-letter code, or create a room.')
     }
 
@@ -413,6 +460,14 @@ export function useGameServer() {
     [send],
   )
 
+  const cancelInvite = useCallback(() => {
+    setInviteCode(null)
+    setPendingCode(null)
+    stickyNoticeRef.current = false
+    if (window.location.pathname !== '/') window.history.pushState(null, '', '/')
+    setNotice('Ask the host for a four-letter code, or create a room.')
+  }, [])
+
   const leaveRoom = useCallback(() => {
     acceptRoomRef.current = false
     stickyNoticeRef.current = false
@@ -420,6 +475,8 @@ export function useGameServer() {
     send({ type: 'leave_room' })
     rememberRoom(null)
     setTable(null)
+    setInviteCode(null)
+    setPendingCode(null)
     if (window.location.pathname !== '/') window.history.pushState(null, '', '/')
     setNotice('Ask the host for a four-letter code, or create a room.')
   }, [rememberRoom, send])
@@ -468,8 +525,11 @@ export function useGameServer() {
     table,
     notice,
     deckIssue,
+    inviteCode,
+    pendingCode,
     createRoom,
     joinRoom,
+    cancelInvite,
     selectDecks,
     setScoreLimit,
     uploadDeck,

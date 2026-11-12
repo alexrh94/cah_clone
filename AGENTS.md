@@ -24,7 +24,7 @@ The player who creates the room is the host. Only the host can choose decks, set
 
 A player is in at most one room: creating or joining another room removes them from the previous one and tells whoever is left. If the host leaves, the next player in join order becomes host. When the last player leaves, the room stays open for 15 seconds. After that the room, including any uploaded decks, is deleted.
 
-The browser address is `/room/` plus the code. The socket client joins that code on connect, using the stored nickname. The client stores the player id in `sessionStorage` under `cah-player-id`. Both Vite and the static server serve `index.html` for that path. A refresh of that path sends `resume` with the stored id. The server keeps the dropped seat, including that player's hand and the current turn, for 10 seconds so the refresh can reclaim it. Closing the tab does not resume, and the seat is removed when that window ends. An explicit leave removes the seat immediately. Joining as a new player is rejected while a game is in progress.
+The browser address is `/room/` plus the code. Opening that link asks for a nickname, then joins with the code from the path. The client stores the player id in `sessionStorage` under `cah-player-id` once that player is in the room. Both Vite and the static server serve `index.html` for that path. A refresh of that path sends `resume` with the stored id. The server keeps the dropped seat, including that player's hand and the current turn, for 10 seconds so the refresh can reclaim it. Closing the tab does not resume, and the seat is removed when that window ends. An explicit leave removes the seat immediately. Joining as a new player is rejected while a game is in progress.
 
 ## Decks
 

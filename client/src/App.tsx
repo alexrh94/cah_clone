@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { requiredCards, UNDERSCORE_MESSAGE, validateDeck } from './deck'
 import { GameView } from './GameView'
 import {
@@ -52,6 +52,16 @@ export function App() {
           onStart={game.startGame}
           onLeave={game.leaveRoom}
         />
+      ) : game.inviteCode ? (
+        <InviteView
+          code={game.inviteCode}
+          notice={game.notice}
+          connection={game.connection}
+          onJoin={game.joinRoom}
+          onCancel={game.cancelInvite}
+        />
+      ) : game.pendingCode ? (
+        <RejoinView code={game.pendingCode} notice={game.notice} />
       ) : (
         <LobbyView
           notice={game.notice}
@@ -150,6 +160,81 @@ function LobbyView({
   )
 }
 
+function InviteView({
+  code,
+  notice,
+  connection,
+  onJoin,
+  onCancel,
+}: {
+  code: string
+  notice: string
+  connection: Connection
+  onJoin: (code: string, nickname: string) => void
+  onCancel: () => void
+}) {
+  const [nickname, setNickname] = useState(readNickname)
+  const connected = connection === 'open'
+  const message =
+    notice ||
+    (connection === 'connecting'
+      ? 'Connecting to the game server…'
+      : connection === 'closed'
+        ? 'The game server disconnected.'
+        : '')
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!connected) return
+    onJoin(code, nickname)
+  }
+
+  return (
+    <>
+      <p className="eyebrow">Join room</p>
+      <h1 className="room-code">{code}</h1>
+      <p className="lede">Enter a nickname, then join this room.</p>
+      <form className="join" onSubmit={handleSubmit}>
+        <label htmlFor="invite-nickname">Nickname</label>
+        <input
+          id="invite-nickname"
+          className="name"
+          name="nickname"
+          value={nickname}
+          autoComplete="nickname"
+          autoFocus
+          maxLength={24}
+          placeholder="Enter your nickname"
+          onChange={(event) => setNickname(event.target.value)}
+        />
+        <button type="submit" className="start" disabled={!connected}>
+          Join room
+        </button>
+        <button type="button" className="secondary" onClick={onCancel}>
+          Use a different room
+        </button>
+        {message && (
+          <p className="status" role="status">
+            {message}
+          </p>
+        )}
+      </form>
+    </>
+  )
+}
+
+function RejoinView({ code, notice }: { code: string; notice: string }) {
+  return (
+    <>
+      <p className="eyebrow">Room code</p>
+      <h1 className="room-code">{code}</h1>
+      <p className="lede" role="status">
+        {notice || `Joining room ${code}…`}
+      </p>
+    </>
+  )
+}
+
 function RoomView({
   room,
   playerId,
@@ -174,7 +259,10 @@ function RoomView({
   onLeave: () => void
 }) {
   const [localIssue, setLocalIssue] = useState<DeckIssue | null>(null)
+  const [copied, setCopied] = useState(false)
+  const linkRef = useRef<HTMLInputElement>(null)
   const isHost = room.hostId === playerId
+  const inviteLink = `${window.location.origin}/room/${room.code}`
   const options = [...decks, ...room.customDecks]
   const selected = options.filter((deck) => room.deckIds.includes(deck.id))
   const blackTotal = selected.reduce((sum, deck) => sum + deck.blackCount, 0)
@@ -241,7 +329,30 @@ function RoomView({
     <>
       <p className="eyebrow">Room code</p>
       <h1 className="room-code">{room.code}</h1>
-      <p className="lede">Share this code with the other players. The host chooses the decks and the score limit.</p>
+      <p className="lede">Share this link. Anyone who opens it can choose a name and join. The host chooses the decks and the score limit.</p>
+      <div className="share-row">
+        <input id="room-link" className="share-link" ref={linkRef} readOnly value={inviteLink} aria-label="Room link" />
+        <button
+          type="button"
+          onClick={() => {
+            const markCopied = () => {
+              setCopied(true)
+              window.setTimeout(() => setCopied(false), 2000)
+            }
+            const selectLink = () => {
+              linkRef.current?.focus()
+              linkRef.current?.select()
+            }
+            if (!navigator.clipboard?.writeText) {
+              selectLink()
+              return
+            }
+            void navigator.clipboard.writeText(inviteLink).then(markCopied, selectLink)
+          }}
+        >
+          {copied ? 'Copied' : 'Copy link'}
+        </button>
+      </div>
       <section className="join">
         <div className="setup-columns">
           <div className="field">
