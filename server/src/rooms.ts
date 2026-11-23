@@ -1,9 +1,11 @@
 import type { Deck } from './deck.js'
+import { TARGET_HAND_SIZE, isHandSize } from './game.js'
 import { isValidRoomCode } from './roomCode.js'
 
 export const DEFAULT_SCORE_LIMIT = 7
 export const MIN_SCORE_LIMIT = 1
 export const MAX_SCORE_LIMIT = 20
+export const DEFAULT_HAND_SIZE = TARGET_HAND_SIZE
 
 export interface CustomDeckSummary {
   id: string
@@ -17,6 +19,7 @@ export interface PublicRoom {
   hostId: string
   deckIds: string[]
   scoreLimit: number
+  handSize: number
   playerIds: string[]
   customDecks: CustomDeckSummary[]
 }
@@ -35,6 +38,7 @@ export interface RoomStore {
   join(playerId: string, code: string): RoomResult
   selectDecks(playerId: string, deckIds: readonly string[], knownDeckIds: ReadonlySet<string>): RoomResult
   setScoreLimit(playerId: string, scoreLimit: number): RoomResult
+  setHandSize(playerId: string, handSize: number): RoomResult
   addCustomDeck(playerId: string, id: string, deck: Deck): RoomResult
   getCustomDeck(code: string, id: string): Deck | undefined
   leave(playerId: string): RoomChange | null
@@ -49,6 +53,7 @@ interface InternalRoom {
   hostId: string
   deckIds: string[]
   scoreLimit: number
+  handSize: number
   playerIds: string[]
   customDecks: Map<string, Deck>
 }
@@ -65,6 +70,7 @@ function snapshot(room: InternalRoom): PublicRoom {
     hostId: room.hostId,
     deckIds: [...room.deckIds],
     scoreLimit: room.scoreLimit,
+    handSize: room.handSize,
     playerIds: [...room.playerIds],
     customDecks: customSummaries(room),
   }
@@ -132,6 +138,7 @@ export function createRoomStore(): RoomStore {
         hostId,
         deckIds: [],
         scoreLimit: DEFAULT_SCORE_LIMIT,
+        handSize: DEFAULT_HAND_SIZE,
         playerIds: [hostId],
         customDecks: new Map(),
       }
@@ -197,6 +204,22 @@ export function createRoomStore(): RoomStore {
       }
 
       room.scoreLimit = scoreLimit
+      return { ok: true, room: snapshot(room), previous: null }
+    },
+
+    setHandSize(playerId, handSize) {
+      const room = roomFor(playerId)
+      if (!room) {
+        return { ok: false, error: 'Join a room before setting the hand size.' }
+      }
+      if (room.hostId !== playerId) {
+        return { ok: false, error: 'Only the host can set the hand size.' }
+      }
+      if (!isHandSize(handSize)) {
+        return { ok: false, error: 'Hand size must be 10, 15, or 20.' }
+      }
+
+      room.handSize = handSize
       return { ok: true, room: snapshot(room), previous: null }
     },
 

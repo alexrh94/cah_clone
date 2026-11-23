@@ -37,6 +37,7 @@ type ClientMessage =
   | { type: 'resume'; playerId: string; code: string; nickname: string }
   | { type: 'select_decks'; deckIds: string[] }
   | { type: 'set_score_limit'; scoreLimit: number }
+  | { type: 'set_hand_size'; handSize: number }
   | { type: 'upload_deck'; deck: unknown }
   | { type: 'start_game' }
   | { type: 'submit_cards'; cardIds: string[] }
@@ -77,6 +78,9 @@ function parseClientMessage(value: unknown): ClientMessage | null {
   }
   if (value.type === 'set_score_limit' && typeof value.scoreLimit === 'number') {
     return { type: 'set_score_limit', scoreLimit: value.scoreLimit }
+  }
+  if (value.type === 'set_hand_size' && typeof value.handSize === 'number') {
+    return { type: 'set_hand_size', handSize: value.handSize }
   }
   if (value.type === 'upload_deck') return { type: 'upload_deck', deck: value.deck }
   if (value.type === 'submit_cards' && Array.isArray(value.cardIds) && value.cardIds.every((id) => typeof id === 'string')) {
@@ -168,6 +172,7 @@ export function createGameServer(
       code: room.code,
       deckIds: room.deckIds,
       scoreLimit: room.scoreLimit,
+      handSize: room.handSize,
       hostId: room.hostId,
       playerIds: room.playerIds,
       players: room.playerIds.map((id) => ({ id, nickname: nicknames.get(id) ?? '' })),
@@ -375,7 +380,12 @@ export function createGameServer(
         return
       }
 
-      if (message.type === 'select_decks' || message.type === 'set_score_limit' || message.type === 'upload_deck') {
+      if (
+        message.type === 'select_decks' ||
+        message.type === 'set_score_limit' ||
+        message.type === 'set_hand_size' ||
+        message.type === 'upload_deck'
+      ) {
         const currentCode = rooms.codeFor(playerId)
         if (currentCode && games.has(currentCode)) {
           sendError(socket, 'The game has already started.')
@@ -405,6 +415,16 @@ export function createGameServer(
 
       if (message.type === 'set_score_limit') {
         const result = rooms.setScoreLimit(playerId, message.scoreLimit)
+        if (!result.ok) {
+          sendError(socket, result.error)
+          return
+        }
+        publish(result.room)
+        return
+      }
+
+      if (message.type === 'set_hand_size') {
+        const result = rooms.setHandSize(playerId, message.handSize)
         if (!result.ok) {
           sendError(socket, result.error)
           return
@@ -462,12 +482,12 @@ export function createGameServer(
           parts.push(loaded.deck)
         }
         const deck = combineDecks(parts)
-        const need = requiredCards(current.playerIds.length)
+        const need = requiredCards(current.playerIds.length, current.handSize)
         if (deck.black.length < need.black || deck.white.length < need.white) {
           sendError(socket, 'Please add more cards to the deck.')
           return
         }
-        const created = createGame(current.playerIds, current.hostId, deck, current.scoreLimit, random)
+        const created = createGame(current.playerIds, current.hostId, deck, current.scoreLimit, random, current.handSize)
         if (!created.ok) {
           sendError(socket, created.error)
           return

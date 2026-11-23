@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { PublicSubmission, RoomPlayer, RoomState, TableState } from './useGameServer'
+import type { HandCard, PublicSubmission, RoomPlayer, RoomState, TableState } from './useGameServer'
 
 export function GameView({
   room,
@@ -51,7 +51,7 @@ export function GameView({
   }
 
   return (
-    <div className={spread ? 'table-screen is-spread' : 'table-screen'}>
+    <div className={spread ? 'table-screen is-spread' : table.handSize > 10 ? 'table-screen is-tall-hand' : 'table-screen'}>
       <aside className="scoreboard" aria-label="Scores">
         <p className="scoreboard-title">Scores</p>
         <ol>
@@ -110,35 +110,10 @@ export function GameView({
       </section>
 
       <section className={isTzar && table.phase === 'judging' ? 'hand-bar is-docked' : 'hand-bar'} aria-label="Your hand">
-        {showTzarHand && (
-          <div className="hand is-locked">
-            {table.you.hand.map((card) => (
-              <div key={card.id} className="white-card">
-                {card.text}
-              </div>
-            ))}
-          </div>
-        )}
+        {showTzarHand && <HandCards cards={table.you.hand} handSize={table.handSize} locked />}
         {showHand ? (
           <>
-            <div className="hand">
-              {table.you.hand.map((card) => {
-                const order = selected.indexOf(card.id)
-                const chosen = order >= 0
-                return (
-                  <button
-                    key={card.id}
-                    type="button"
-                    className={chosen ? 'white-card selected' : 'white-card'}
-                    aria-pressed={chosen}
-                    onClick={() => toggle(card.id)}
-                  >
-                    {chosen && <span className="order">{order + 1}</span>}
-                    {card.text}
-                  </button>
-                )
-              })}
-            </div>
+            <HandCards cards={table.you.hand} handSize={table.handSize} selected={selected} onToggle={toggle} />
             <button type="button" className="confirm" disabled={!readyToPlay} onClick={() => onSubmit(selected)}>
               {readyToPlay ? 'Play' : `${selected.length} of ${table.black.pick}`}
             </button>
@@ -175,6 +150,59 @@ export function GameView({
       </section>
     </div>
   )
+}
+
+function HandCards({
+  cards,
+  handSize,
+  locked = false,
+  selected = [],
+  onToggle,
+}: {
+  cards: HandCard[]
+  handSize: number
+  locked?: boolean
+  selected?: string[]
+  onToggle?: (cardId: string) => void
+}) {
+  const className = ['hand', locked ? 'is-locked' : '', handSize === 15 ? 'is-fifteen' : '', handSize === 20 ? 'is-twenty' : '']
+    .filter((name) => name !== '')
+    .join(' ')
+
+  const renderCard = (card: HandCard) => {
+    if (locked || !onToggle) {
+      return (
+        <div key={card.id} className="white-card">
+          {card.text}
+        </div>
+      )
+    }
+    const order = selected.indexOf(card.id)
+    const chosen = order >= 0
+    return (
+      <button
+        key={card.id}
+        type="button"
+        className={chosen ? 'white-card selected' : 'white-card'}
+        aria-pressed={chosen}
+        onClick={() => onToggle(card.id)}
+      >
+        {chosen && <span className="order">{order + 1}</span>}
+        {card.text}
+      </button>
+    )
+  }
+
+  if (handSize === 15) {
+    return (
+      <div className={className}>
+        <div className="hand-row is-top">{cards.slice(0, 7).map(renderCard)}</div>
+        <div className="hand-row is-bottom">{cards.slice(7).map(renderCard)}</div>
+      </div>
+    )
+  }
+
+  return <div className={className}>{cards.map(renderCard)}</div>
 }
 
 function SubmissionCard({

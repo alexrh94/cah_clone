@@ -1,11 +1,17 @@
 import type { BlackCard, Deck } from './deck.js'
 
+/** Lobby choices. Keep this in step with HAND_SIZES in client/src/deck.ts. */
+export const HAND_SIZES = [10, 15, 20] as const
 export const TARGET_HAND_SIZE = 10
 export const MIN_PLAYERS = 3
 
+export function isHandSize(value: number): value is (typeof HAND_SIZES)[number] {
+  return HAND_SIZES.some((size) => size === value)
+}
+
 /** White cards cover one full hand per player. Black cards are at least 20% of that white minimum. Keep this in step with requiredCards in client/src/deck.ts. */
-export function requiredCards(playerCount: number): { black: number; white: number } {
-  const white = playerCount * TARGET_HAND_SIZE
+export function requiredCards(playerCount: number, handSize: number = TARGET_HAND_SIZE): { black: number; white: number } {
+  const white = playerCount * handSize
   const black = Math.ceil(white * 0.2)
   return { black, white }
 }
@@ -34,6 +40,7 @@ export interface ScoreSeat {
 export interface GameView {
   phase: 'picking' | 'judging' | 'reveal'
   scoreLimit: number
+  handSize: number
   black: BlackCard
   tzarId: string
   scores: ScoreSeat[]
@@ -145,6 +152,7 @@ export function createGame(
   deck: Deck,
   scoreLimit: number,
   random: () => number = Math.random,
+  targetHandSize: number = TARGET_HAND_SIZE,
 ): GameResult<{ game: GameState }> {
   if (playerIds.length < MIN_PLAYERS) {
     return { ok: false, error: 'At least three players are needed to start.' }
@@ -162,7 +170,7 @@ export function createGame(
     return { ok: false, error: 'This deck does not have enough white cards for this many players.' }
   }
 
-  const handSize = Math.min(TARGET_HAND_SIZE, perPlayer)
+  const handSize = Math.min(targetHandSize, perPlayer)
   const whiteDraw = shuffle([...deck.white], random)
   const blackDraw = shuffle(
     deck.black.map((card) => ({ text: card.text, pick: card.pick })),
@@ -338,6 +346,7 @@ export function viewFor(game: GameState, playerId: string): GameView {
   return {
     phase: game.phase,
     scoreLimit: game.scoreLimit,
+    handSize: game.handSize,
     black: { text: game.currentBlack.text, pick: game.currentBlack.pick },
     tzarId: judge,
     scores: game.order.map((id) => ({ id, score: game.scores.get(id) ?? 0 })),

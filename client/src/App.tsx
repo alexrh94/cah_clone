@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from 'react'
-import { requiredCards, UNDERSCORE_MESSAGE, validateDeck } from './deck'
+import { requiredCards, HAND_SIZES, UNDERSCORE_MESSAGE, validateDeck } from './deck'
 import { GameView } from './GameView'
 import {
   readNickname,
@@ -48,6 +48,7 @@ export function App() {
           deckIssue={game.deckIssue}
           onSelectDecks={game.selectDecks}
           onScoreLimit={game.setScoreLimit}
+          onHandSize={game.setHandSize}
           onUpload={game.uploadDeck}
           onStart={game.startGame}
           onLeave={game.leaveRoom}
@@ -243,6 +244,7 @@ function RoomView({
   deckIssue,
   onSelectDecks,
   onScoreLimit,
+  onHandSize,
   onUpload,
   onStart,
   onLeave,
@@ -254,6 +256,7 @@ function RoomView({
   deckIssue: DeckIssue | null
   onSelectDecks: (deckIds: string[]) => void
   onScoreLimit: (scoreLimit: number) => void
+  onHandSize: (handSize: number) => void
   onUpload: (deck: { name: string; black: string[]; white: string[] }) => boolean
   onStart: () => void
   onLeave: () => void
@@ -267,7 +270,7 @@ function RoomView({
   const selected = options.filter((deck) => room.deckIds.includes(deck.id))
   const blackTotal = selected.reduce((sum, deck) => sum + deck.blackCount, 0)
   const whiteTotal = selected.reduce((sum, deck) => sum + deck.whiteCount, 0)
-  const minimum = requiredCards(room.players.length)
+  const minimum = requiredCards(room.players.length, room.handSize)
   const enoughCards = blackTotal >= minimum.black && whiteTotal >= minimum.white
   const canStart = isHost && room.players.length >= 3 && enoughCards
   const hint = room.deckIds.length === 0
@@ -329,7 +332,7 @@ function RoomView({
     <>
       <p className="eyebrow">Room code</p>
       <h1 className="room-code">{room.code}</h1>
-      <p className="lede">Share this link. Anyone who opens it can choose a name and join. The host chooses the decks and the score limit.</p>
+      <p className="lede">Share this link. Anyone who opens it can choose a name and join. The host chooses the decks, the hand size, and the score limit.</p>
       <div className="share-row">
         <input id="room-link" className="share-link" ref={linkRef} readOnly value={inviteLink} aria-label="Room link" />
         <button
@@ -386,23 +389,45 @@ function RoomView({
             </p>
           </div>
           <div className="setup-side">
-            <div className="field">
-              <label htmlFor="score-limit">Score limit</label>
-              <input
-                id="score-limit"
-                className="score-limit"
-                name="scoreLimit"
-                type="number"
-                min={1}
-                max={20}
-                step={1}
-                value={room.scoreLimit}
-                disabled={!isHost}
-                onChange={(event) => {
-                  const scoreLimit = Number(event.target.value)
-                  if (Number.isInteger(scoreLimit) && scoreLimit >= 1 && scoreLimit <= 20) onScoreLimit(scoreLimit)
-                }}
-              />
+            <div className="setup-settings">
+              <div className="field">
+                <label htmlFor="hand-size">Hand size</label>
+                <select
+                  id="hand-size"
+                  className="hand-size"
+                  name="handSize"
+                  value={room.handSize}
+                  disabled={!isHost}
+                  onChange={(event) => {
+                    const handSize = Number(event.target.value)
+                    if (HAND_SIZES.some((size) => size === handSize)) onHandSize(handSize)
+                  }}
+                >
+                  {HAND_SIZES.map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="score-limit">Score limit</label>
+                <input
+                  id="score-limit"
+                  className="score-limit"
+                  name="scoreLimit"
+                  type="number"
+                  min={1}
+                  max={20}
+                  step={1}
+                  value={room.scoreLimit}
+                  disabled={!isHost}
+                  onChange={(event) => {
+                    const scoreLimit = Number(event.target.value)
+                    if (Number.isInteger(scoreLimit) && scoreLimit >= 1 && scoreLimit <= 20) onScoreLimit(scoreLimit)
+                  }}
+                />
+              </div>
             </div>
             <div className="field">
               <label htmlFor="deck-file">Upload a deck</label>

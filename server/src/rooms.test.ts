@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Deck } from './deck.js'
-import { createRoomStore, DEFAULT_SCORE_LIMIT } from './rooms.js'
+import { createRoomStore, DEFAULT_HAND_SIZE, DEFAULT_SCORE_LIMIT } from './rooms.js'
 
 const decks = new Set(['sample'])
 
@@ -23,6 +23,7 @@ test('create opens a room hosted by that player', () => {
     hostId: 'host',
     deckIds: [],
     scoreLimit: DEFAULT_SCORE_LIMIT,
+    handSize: DEFAULT_HAND_SIZE,
     playerIds: ['host'],
     customDecks: [],
   })
@@ -110,6 +111,26 @@ test('setScoreLimit accepts a host value from 1 to 20', () => {
   assert.equal(updated.ok, true)
   if (!updated.ok) return
   assert.equal(updated.room.scoreLimit, 5)
+})
+
+test('setHandSize accepts 10, 15, and 20 from the host', () => {
+  const store = createRoomStore()
+  assert.equal(store.create('host', 'ABCD').ok, true)
+  assert.equal(store.join('guest', 'ABCD').ok, true)
+  assert.equal(store.get('ABCD')?.handSize, DEFAULT_HAND_SIZE)
+  assert.equal(store.setHandSize('guest', 15).ok, false)
+  assert.equal(store.setHandSize('host', 12).ok, false)
+  assert.equal(store.setHandSize('host', 11).ok, false)
+  assert.equal(store.setHandSize('outsider', 20).ok, false)
+
+  const updated = store.setHandSize('host', 15)
+  assert.equal(updated.ok, true)
+  if (!updated.ok) return
+  assert.equal(updated.room.handSize, 15)
+  assert.equal(store.setHandSize('host', 20).ok, true)
+  assert.equal(store.get('ABCD')?.handSize, 20)
+  assert.equal(store.setHandSize('host', 10).ok, true)
+  assert.equal(store.get('ABCD')?.handSize, 10)
 })
 
 test('custom decks stay with the room until it is dropped', () => {

@@ -171,6 +171,12 @@ h1 {
   grid-column: 1 / -1;
 }
 
+.setup-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  column-gap: 1rem;
+}
+
 .deck-heading {
   display: block;
   margin: 0 0 0.5rem;
@@ -224,7 +230,8 @@ h1 {
   width: 100%;
 }
 
-.join input.score-limit {
+.join input.score-limit,
+.join select.hand-size {
   max-width: 8rem;
 }
 
@@ -541,10 +548,33 @@ button.submission:hover {
 }
 
 .hand {
+  --hand-gap: 0.55rem;
   display: grid;
   grid-template-columns: repeat(10, minmax(0, 1fr));
-  gap: 0.55rem;
+  gap: var(--hand-gap);
   padding-bottom: 0.4rem;
+}
+
+.hand.is-fifteen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.hand.is-fifteen .hand-row {
+  display: grid;
+  gap: var(--hand-gap);
+}
+
+/* Same card width as the 10-column hand. Centering the shorter top row shifts it by half a card. */
+.hand.is-fifteen .hand-row.is-top {
+  width: calc(0.7 * (100% - 9 * var(--hand-gap)) + 6 * var(--hand-gap));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.hand.is-fifteen .hand-row.is-bottom {
+  width: calc(0.8 * (100% - 9 * var(--hand-gap)) + 7 * var(--hand-gap));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
 }
 
 .hand.is-locked .white-card {
@@ -588,7 +618,7 @@ button.submission:hover {
 
 @media (max-width: 1100px) {
   .hand {
-    gap: 0.35rem;
+    --hand-gap: 0.35rem;
   }
 
   .white-card {
@@ -625,7 +655,7 @@ button.submission:hover {
   }
 
   .hand {
-    gap: 0.3rem;
+    --hand-gap: 0.3rem;
   }
 
   .white-card {
@@ -637,8 +667,27 @@ button.submission:hover {
 }
 
 @media (max-height: 760px) {
-  .white-card {
+  .white-card,
+  .hand.is-fifteen .white-card,
+  .hand.is-twenty .white-card {
     min-height: 7.25rem;
+  }
+
+  .table-screen.is-tall-hand {
+    padding-top: 0.75rem;
+  }
+
+  .table-screen.is-tall-hand .black-card {
+    min-height: 11rem;
+    padding: 0.85rem 0.75rem;
+  }
+
+  .table-screen.is-tall-hand .hand.is-fifteen .white-card,
+  .table-screen.is-tall-hand .hand.is-twenty .white-card {
+    min-height: 6.25rem;
+    padding: 0.45rem 0.4rem;
+    font-size: 0.78rem;
+    line-height: 1.25;
   }
 
   .black-card,
