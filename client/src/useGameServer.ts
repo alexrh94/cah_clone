@@ -16,6 +16,7 @@ export interface RoomState {
   code: string
   deckIds: string[]
   scoreLimit: number
+  handSize: number
   hostId: string
   players: RoomPlayer[]
   customDecks: DeckChoice[]
@@ -39,6 +40,7 @@ export interface ScoreSeat {
 export interface TableState {
   phase: 'picking' | 'judging' | 'reveal'
   scoreLimit: number
+  handSize: number
   black: { text: string; pick: number }
   tzarId: string
   scores: ScoreSeat[]
@@ -156,12 +158,14 @@ function readRoom(value: unknown): RoomState | null {
   if (typeof value.code !== 'string' || typeof value.hostId !== 'string') return null
   if (!Array.isArray(value.deckIds) || !value.deckIds.every((deckId) => typeof deckId === 'string')) return null
   if (typeof value.scoreLimit !== 'number' || !Number.isInteger(value.scoreLimit)) return null
+  if (typeof value.handSize !== 'number' || !Number.isInteger(value.handSize) || value.handSize < 1) return null
   if (!Array.isArray(value.players) || !value.players.every(isRoomPlayer)) return null
   if (!Array.isArray(value.customDecks) || !value.customDecks.every(isDeckChoice)) return null
   return {
     code: value.code,
     deckIds: value.deckIds,
     scoreLimit: value.scoreLimit,
+    handSize: value.handSize,
     hostId: value.hostId,
     players: value.players,
     customDecks: value.customDecks,
@@ -172,6 +176,7 @@ function readTable(value: unknown): TableState | null {
   if (!isRecord(value) || value.type !== 'game') return null
   if (value.phase !== 'picking' && value.phase !== 'judging' && value.phase !== 'reveal') return null
   if (typeof value.scoreLimit !== 'number' || !Number.isInteger(value.scoreLimit)) return null
+  if (typeof value.handSize !== 'number' || !Number.isInteger(value.handSize) || value.handSize < 1) return null
   if (!isRecord(value.black) || typeof value.black.text !== 'string' || typeof value.black.pick !== 'number') return null
   if (!Number.isInteger(value.black.pick) || value.black.pick < 1) return null
   if (typeof value.tzarId !== 'string') return null
@@ -190,6 +195,7 @@ function readTable(value: unknown): TableState | null {
   return {
     phase: value.phase,
     scoreLimit: value.scoreLimit,
+    handSize: value.handSize,
     black: { text: value.black.text, pick: value.black.pick },
     tzarId: value.tzarId,
     scores: value.scores,
@@ -451,6 +457,14 @@ export function useGameServer() {
     [send],
   )
 
+  const setHandSize = useCallback(
+    (handSize: number) => {
+      if (!send({ type: 'set_hand_size', handSize })) return
+      setNotice('')
+    },
+    [send],
+  )
+
   const uploadDeck = useCallback(
     (deck: { name: string; black: string[]; white: string[] }) => {
       if (!send({ type: 'upload_deck', deck })) return false
@@ -532,6 +546,7 @@ export function useGameServer() {
     cancelInvite,
     selectDecks,
     setScoreLimit,
+    setHandSize,
     uploadDeck,
     leaveRoom,
     startGame,

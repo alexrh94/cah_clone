@@ -197,6 +197,7 @@ test('the host can set a score limit and upload a deck', async () => {
     const created = await until(host, 'room')
     const code = typeof created.code === 'string' ? created.code : ''
     assert.equal(created.scoreLimit, 7)
+    assert.equal(created.handSize, 10)
 
     host.send({ type: 'set_score_limit', scoreLimit: 5 })
     const scored = await until(host, 'room')
@@ -594,6 +595,90 @@ test('resume rejects an unknown seat and join stays closed during a game', async
       handOf(updated),
       hand.filter((card) => !hand.slice(0, pick).some((played) => played.id === card.id)),
     )
+  } finally {
+    for (const socket of sockets) socket.close()
+    await closeGameServer(gameServer)
+  }
+})
+
+test('the host sets the hand size and the game deals that many cards', async () => {
+  const clientDir = mkdtempSync(join(tmpdir(), 'cah-serve-'))
+  writeFileSync(join(clientDir, 'index.html'), '<h1>Cards Against Humanity</h1>')
+  const gameServer = createGameServer(clientDir, sampleDecksDir)
+  const port = await listen(gameServer, 0)
+  const url = `ws://127.0.0.1:${port}/ws`
+  const sockets = [new WebSocket(url), new WebSocket(url), new WebSocket(url)]
+  const clients = sockets.map(track)
+  const host = clients[0]
+  const guest = clients[1]
+  if (!host || !guest) throw new Error('missing player')
+
+  function lines(prefix: string, count: number, blank: boolean): string[] {
+    return Array.from({ length: count }, (_, index) => (blank ? `${prefix} ${index} _.` : `${prefix} ${index}`))
+  }
+
+  function deckId(room: Record<string, unknown>, name: string): string {
+    if (!Array.isArray(room.customDecks)) return ''
+    const match = room.customDecks.find((deck) => isRecord(deck) && deck.name === name)
+    return isRecord(match) && typeof match.id === 'string' ? match.id : ''
+  }
+
+  try {
+    for (const client of clients) {
+      await until(client, 'connected')
+      await until(client, 'decks')
+    }
+
+    host.send({ type: 'create_room', nickname: 'Alex' })
+    const created = await until(host, 'room')
+    const code = typeof created.code === 'string' ? created.code : ''
+    assert.equal(created.handSize, 10)
+
+    host.send({ type: 'set_hand_size', handSize: 12 })
+    assert.equal((await until(host, 'error')).message, 'Hand size must be 10, 15, or 20.')
+
+    host.send({ type: 'set_hand_size', handSize: 15 })
+    assert.equal((await until(host, 'room')).handSize, 15)
+
+    guest.send({ type: 'join_room', code, nickname: 'Sam' })
+    clients[2]?.send({ type: 'join_room', code, nickname: 'Jo' })
+    let room = await until(host, 'room')
+    while (!Array.isArray(room.playerIds) || room.playerIds.length < 3) room = await until(host, 'room')
+    assert.equal(room.handSize, 15)
+    assert.equal((await until(guest, 'room')).handSize, 15)
+    guest.send({ type: 'set_hand_size', handSize: 20 })
+    assert.equal((await until(guest, 'error')).message, 'Only the host can set the hand size.')
+
+    host.send({
+      type: 'upload_deck',
+      deck: { name: 'Short', black: lines('S', 6, true), white: lines('s', 30, false) },
+    })
+    room = await until(host, 'room')
+    while (deckId(room, 'Short') === '') room = await until(host, 'room')
+    const shortId = deckId(room, 'Short')
+    host.send({ type: 'select_decks', deckIds: [shortId] })
+    room = await until(host, 'room')
+    while (!Array.isArray(room.deckIds) || room.deckIds[0] !== shortId) room = await until(host, 'room')
+    host.send({ type: 'start_game' })
+    assert.equal((await until(host, 'error')).message, 'Please add more cards to the deck.')
+
+    host.send({
+      type: 'upload_deck',
+      deck: { name: 'Full', black: lines('F', 9, true), white: lines('f', 45, false) },
+    })
+    room = await until(host, 'room')
+    while (deckId(room, 'Full') === '') room = await until(host, 'room')
+    const fullId = deckId(room, 'Full')
+    host.send({ type: 'select_decks', deckIds: [fullId] })
+    room = await until(host, 'room')
+    while (!Array.isArray(room.deckIds) || room.deckIds[0] !== fullId) room = await until(host, 'room')
+    host.send({ type: 'start_game' })
+    const started = await until(host, 'game')
+    assert.equal(started.handSize, 15)
+    assert.equal(handOf(started).length, 15)
+
+    host.send({ type: 'set_hand_size', handSize: 20 })
+    assert.equal((await until(host, 'error')).message, 'The game has already started.')
   } finally {
     for (const socket of sockets) socket.close()
     await closeGameServer(gameServer)

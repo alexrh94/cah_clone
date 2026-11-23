@@ -15,10 +15,14 @@ function deck(black: string[], white: string[]): Deck {
 
 const whites = Array.from({ length: 20 }, (_, index) => `w${index}`)
 
-test('requiredCards scales with the number of players', () => {
+test('requiredCards scales with the number of players and the hand size', () => {
   assert.deepEqual(requiredCards(1), { white: 10, black: 2 })
   assert.deepEqual(requiredCards(3), { white: 30, black: 6 })
   assert.deepEqual(requiredCards(5), { white: 50, black: 10 })
+  assert.deepEqual(requiredCards(3, 15), { white: 45, black: 9 })
+  assert.deepEqual(requiredCards(5, 15), { white: 75, black: 15 })
+  assert.deepEqual(requiredCards(3, 20), { white: 60, black: 12 })
+  assert.deepEqual(requiredCards(5, 20), { white: 100, black: 20 })
 })
 
 test('createGame deals a shared hand and refuses a deck that cannot cover the largest pick', () => {
@@ -145,4 +149,47 @@ test('removePlayer returns cards to the deck and ends the game below three playe
   for (const text of leaving) assert.equal(game.whiteDraw.includes(text), true)
 
   assert.equal(removePlayer(game, 'b').abort, true)
+})
+
+test('the chosen hand size is dealt and refilled after each turn', () => {
+  const players = ['host', 'a', 'b']
+  const created = createGame(
+    players,
+    'host',
+    deck(['one _', 'two _'], Array.from({ length: 45 }, (_, index) => `h${index}`)),
+    7,
+    steady,
+    15,
+  )
+  assert.equal(created.ok, true)
+  if (!created.ok) return
+  const game = created.game
+  assert.equal(game.handSize, 15)
+  assert.equal(viewFor(game, 'a').handSize, 15)
+  for (const playerId of players) assert.equal(game.hands.get(playerId)?.length, 15)
+
+  const handA = game.hands.get('a') ?? []
+  const handB = game.hands.get('b') ?? []
+  assert.equal(submitCards(game, 'a', [handA[0]?.id ?? '']).ok, true)
+  assert.equal(submitCards(game, 'b', [handB[0]?.id ?? '']).ok, true)
+  const winnerId = viewFor(game, 'host').submissions?.[0]?.id ?? ''
+  assert.equal(confirmWinner(game, 'host', winnerId).ok, true)
+  const advanced = nextTurn(game, 'host')
+  assert.equal(advanced.ok, true)
+  if (!advanced.ok) return
+  assert.equal(advanced.finished, false)
+  for (const playerId of players) assert.equal(game.hands.get(playerId)?.length, 15)
+
+  const dealtTwenty = createGame(
+    players,
+    'host',
+    deck(['one _'], Array.from({ length: 60 }, (_, index) => `t${index}`)),
+    7,
+    steady,
+    20,
+  )
+  assert.equal(dealtTwenty.ok, true)
+  if (!dealtTwenty.ok) return
+  assert.equal(dealtTwenty.game.handSize, 20)
+  assert.equal(dealtTwenty.game.hands.get('host')?.length, 20)
 })
